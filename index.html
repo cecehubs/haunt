@@ -1,0 +1,2013 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HAUNT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Creepster&family=VT323&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#e9e2d0;--dim:#8a8070;--blood:#b3121f;--glow:#c8ff5a;--panel:rgba(10,8,8,.88)}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#000;color:var(--ink);overflow:hidden;font-family:'VT323',ui-monospace,monospace;font-size:18px}
+canvas.full{position:fixed;inset:0;width:100vw;height:100vh;display:block}
+#ovl{pointer-events:none;z-index:2}
+#main{z-index:1}
+video{display:none}
+
+#home{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:radial-gradient(ellipse at 50% 40%,#2a0507 0%,#000 70%);z-index:30;text-align:center;padding:16px}
+#home h1{font-family:'Creepster',serif;font-weight:400;font-size:min(24vw,210px);line-height:.9;margin:0;color:var(--blood);letter-spacing:.04em;text-shadow:0 0 40px #500}
+#home p{margin:0;color:var(--dim);max-width:560px;line-height:1.25}
+#home button{margin-top:10px}
+button{font:inherit;color:var(--ink);background:#1a1212;border:1px solid #4a2a2a;padding:6px 12px;cursor:pointer;letter-spacing:.06em}
+button:hover{border-color:var(--blood)}
+button.on{background:#5a0a10;border-color:#d0202e}
+#home button{font-size:28px;padding:10px 34px;background:#3a0408;border-color:#a0141f}
+
+#panel{position:fixed;top:0;right:0;bottom:0;width:270px;background:var(--panel);border-left:1px solid #2a1a1a;padding:12px 14px 16px;overflow-y:auto;z-index:10;transition:transform .45s cubic-bezier(.7,0,.3,1)}
+#panel.hide{transform:translateX(105%)}
+#panel .ph{font-family:'Creepster',serif;font-size:40px;color:var(--blood);line-height:1}
+#panel .sec{margin:14px 0 6px;color:var(--dim);font-size:15px;letter-spacing:.12em;border-bottom:1px solid #2a1a1a}
+#scenes{display:grid;grid-template-columns:1fr;gap:4px}
+#scenes button{text-align:left;display:flex;justify-content:space-between}
+#scenes small{color:var(--dim)}
+#toggles{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+#toggles button{font-size:15px;padding:5px 6px}
+.sl{display:grid;grid-template-columns:96px 1fr 40px;align-items:center;gap:6px;font-size:15px;margin:3px 0}
+.sl input{width:100%;accent-color:#b3121f}
+.sl span:last-child{text-align:right;color:var(--dim)}
+#fmap{font-size:16px;line-height:1.3}
+#pip{width:100%;display:block;border:1px solid #2a1a1a;background:#000}
+#audioDev{width:100%;font:inherit;font-size:15px;color:var(--ink);background:#1a1212;border:1px solid #4a2a2a;padding:4px}
+#fmap b{color:var(--glow);font-weight:400}
+#status{margin-top:12px;font-size:14px;color:var(--dim);white-space:pre-line}
+
+#guide{position:fixed;left:0;right:0;bottom:10px;text-align:center;z-index:5;pointer-events:none;font-size:17px;color:#cfc6b2;text-shadow:0 0 6px #000,0 0 2px #000;transition:opacity .4s;padding:0 12px}
+#guide.off{opacity:0}
+#guide b{color:var(--glow);font-weight:400}
+</style>
+</head>
+<body>
+<video id="cam" playsinline muted></video>
+<canvas id="main" class="full"></canvas>
+<canvas id="ovl" class="full"></canvas>
+
+<div id="home">
+  <h1>HAUNT</h1>
+  <p>Left hand picks the haunting (hold the fingers up). Right hand plays with it.<br>
+  ☝ blood · ✌ ghost · 3 skull · ✋ faces · 🤘 blood paint · 🤙 pumpkin · ✊ hold = clear</p>
+  <button id="go">ENTER</button>
+  <p style="font-size:14px">Needs Chrome, a webcam and internet (MediaPipe). No camera? You get a demo figure and the mouse.</p>
+</div>
+
+<div id="panel">
+  <div class="ph">HAUNT</div>
+  <div class="sec">SCENE · LEFT HAND</div>
+  <div id="scenes"></div>
+  <div class="sec">RIGHT HAND</div>
+  <div id="fmap"></div>
+  <div class="sec">CAMERA <small style="float:right">green = you · C = on wall</small></div>
+  <canvas id="pip" width="242" height="136"></canvas>
+  <div class="sec">SETUP</div>
+  <div id="toggles"></div>
+  <div class="sec">AUDIO INPUT</div>
+  <select id="audioDev"><option value="">default input</option></select>
+  <div class="sec">TUNE</div>
+  <div id="sliders"></div>
+  <div id="status"></div>
+</div>
+<div id="guide"></div>
+
+<script>
+/* =====================================================================
+   SETTINGS — tune here. Everything below reads from this object live.
+   ===================================================================== */
+const SETTINGS = {
+  startScene: 'blood',          // blood | ghost | skull | faces | paint | pumpkin
+  mirror: true,                 // true = selfie view (camera faces you). false = camera beside the projector, looking at the wall.
+  swapHands: false,
+  leftHandSwitch: true,         // left-hand finger poses switch the scene (panel: LEFT HAND SWITCH, key L)             // flip if left/right are the wrong way round (key S)
+  holdToSwitch: 0.45,           // s the left-hand pose must be held to switch scene
+  fistHold: 0.4,                // s a fist must be held to clear + reset
+  cutOutPerson: {               // black out the projection where you stand (per scene, key P)
+    blood: true, ghost: false, skull: false, faces: false, paint: false, pumpkin: false },
+
+  mask: {                       // camera → wall alignment of the person mask (also in the panel)
+    offsetX: 0, offsetY: 0,     // px
+    scale: 1,                   // 1 = camera image fills the screen (cover)
+    grow: 10,                   // px to fatten the cut-out so edges don't spill onto you
+    feather: 28,                // px of soft, shadowy falloff on the cut-out edge
+    shadow: 1,                  // how dark the cut-out is (1 = no light on you at all)
+    threshold: 0.5,             // segmenter confidence counted as "you"
+    invert: 'auto',             // 'auto' | true | false — if the mask is backwards
+    cols: 160,                  // mask resolution (width); height follows the camera aspect
+  },
+
+  blood: {
+    rate: 2.5,                  // ambient drips per second from the ceiling
+    gushRate: 60,               // drips per second during a gush (open palm / entering the scene)
+    fingerRate: 16,             // drips per second from your pointing finger
+    speed: [35, 150],           // px/s
+    width: [3, 11],             // px
+    stick: 0.7,                 // chance per second a drip pauses (stop-go look)
+    thin: 0.55,                 // px/s a drip thins as it runs out
+    slide: 260,                 // px/s drips slide sideways around you
+    pool: 34,                   // max height of the pooled blood at the top
+    dry: 0.03,                  // how fast old blood fades (0 = stays forever)
+    max: 900,
+    colour: '#6e0008', gloss: '#d4202e', bead: '#8a000c',
+    sound: false,               // SOUND BLOOD (key B): no drips; blood forms mandalas + messages that reform on the beat
+    shapeParticles: 1500,       // blobs of blood making each shape
+    blobSize: 7,                // blob size (7 = normal, bigger = gooier)
+    shapeMode: 'mix',           // 'mix' = follow the pattern below · 'hold' = every shape pulses for holdBeats · 'every' = new shape every beat (panel / key N)
+    pattern: [4, 4, 1, 1, 1, 1],// mix: beats each shape stays — two shapes pulse for 4 beats, then a bar of quick flips (16 beats, then repeats)
+    holdBeats: 4,               // beats per shape in 'hold' mode
+    shapeEvery: 6,              // s between shapes if there's no beat
+    morph: 1.2,                 // how fast the blood snaps into the next shape
+    shapes: ['mandala', 'text', 'skull', 'bat', 'web', 'ghost', 'eye', 'spider', 'pentagram', 'moon', 'hand', 'coffin', 'grave', 'pumpkin', 'cat'],
+    messages: ['GET OUT', 'HELP ME', 'I SEE YOU', 'RUN', 'BEHIND YOU', 'TOO LATE', 'BOO', 'REDRUM'],
+  },
+
+  ghost: {
+    delays: [0.6, 1.3, 2.2],    // s behind you for ghost 1, 2, 3 (a light delay)
+    count: 1,                   // ghosts at start (✌ hold adds one)
+    shadowDelay: 0.25,          // s your shadow lags
+    shadowOffsetX: 40, shadowOffsetY: 6,
+    shadowAlpha: 0.75, shadowBlur: 14,
+    spawn: 2200,                // smoke particles per second per ghost
+    life: 1.3,                  // s a particle lives
+    max: 14000,
+    size: 2.2,                  // px, the tiny bright motes
+    rise: 26,                   // px/s upward drift
+    curl: 45,                   // swirl strength
+    smoke: 0.07,                // density of the soft smoke layer
+    smokeFade: 0.12,            // how fast the smoke layer clears (per frame)
+    smokeBlur: 9,               // px
+    motes: 0.45,                // brightness of the tiny particles
+    body: 0.18,                 // faint glow of the whole figure
+    eyes: true,                 // dark hollow eye smudges
+    lean: 0.35,                 // how far ghosts lean toward your pointing finger
+    reform: 1.6,                // s before it smokes back up after being blown away
+    blowPower: 600,
+    follow: 0.09,               // how far behind you it walks (fraction of screen width), on the side you came from
+    behindScale: 0.88,          // a bit smaller = further back
+    colour: '#cfefff', wall: '#15131f', fog: 'rgba(120,110,170,0.06)',
+  },
+
+  skull: {
+    pixel: 16,                  // px per skull pixel (also SKULL SIZE in the panel)
+    spring: 0.16, damp: 0.80,
+    breakSpeed: 2400,           // px/s throw speed that shatters it
+    reassemble: 1.6,            // s to pull itself back together
+    sub: 3,                     // each skull pixel is split into sub×sub tiny particles
+    glow: 0.55,                 // soft glow around the skull
+    audio: 1,                   // how much it pulses to sound
+    mouthHold: 3,               // s with your mouth open before spiders / eyeballs pour out
+    followHead: true,           // sit on your head and copy your mouth (needs the face model)
+    headScale: 1.25,            // skull size relative to your head
+    freeTime: 3,                // s it stays where you threw it before flying back to your head
+    jawDrop: 3,                 // pixels the jaw drops when fully open
+    gravity: 900,               // loose pixels fall a little
+    bone: ['#f2ead3', '#cbbf9f', '#8c8068', '#4f463a'],
+    eye: '#ff2a14', trail: 'rgba(140,255,170,0.07)',
+  },
+
+  faces: {
+    max: 5,                     // random faces in the wall at once
+    followHead: false,          // true = a face also pushes out wherever your head is
+    hands: true,                // your hands push through the wall, mirroring your real hands
+    audio: 1,                   // how much faces react to sound (mouths, glow, shudder)
+    beat: true,                 // with AUDIO IN on, faces punch out of the wall on each beat and sink back between
+    beatRest: 0.15,             // how far out they sit between beats (0 = flat in the wall)
+    beatPunch: 1.2,             // how far out they push on a beat (1 = fully out)
+    beatSink: 0.75,             // fraction of the beat they take to sink back in
+    spawnEvery: 3.2,            // s between new faces
+    size: [0.10, 0.19],         // face radius as a fraction of screen height
+    emerge: 4.0,                // s to push out of the wall
+    hold: [4, 9],               // s they stay
+    res: 0.34,                  // render resolution (lower = softer + faster)
+    depth: 1.3,                 // relief strength
+    wall: '#5b6052', glow: '#d9ff6a',
+  },
+
+  paint: {
+    brush: 20,                  // px
+    dripEvery: 40,              // px of stroke per drip
+    eraser: 60,                 // px radius
+    splat: 1,                   // splatter size
+    dry: 0,                     // 0 = painting stays on the wall
+  },
+
+  pumpkin: {
+    size: 0.34,                 // radius, fraction of screen height
+    knife: 0.032,               // cut width, fraction of pumpkin radius... ×2
+    finishAt: 0.8,              // stencil carved this much = lights up + score
+    flesh: '#f6b25a',
+  },
+
+  skeleton: {
+    pixel: 5,                   // px per skeleton pixel
+    bone: '#f1ead8', glow: '#7dffb2', glowBlur: 12, glowAmt: 0.8,
+    holdUp: 0.35,               // s both hands above your head → blood rain
+    squat: 0.45,                // knees this close under hips (× torso length) = squat → spiders
+    jump: 0.35,                 // feet rise this much (× torso) in 0.35 s = jump → lightning
+    mouthHold: 3,               // s mouth open → spiders / eyeballs
+    spiders: 22,
+    switchHold: 3,              // left-hand scene switching / fist clear need this × longer here, so dancing doesn't trigger them
+  },
+
+  audioPulse: 0.6,              // how much bass kicks things (mic on)
+  audioGain: 1.5,               // how strongly visuals react to the sound (auto-levelled; also in the panel)
+  audioDevice: '',              // input to listen to ('' = default mic); pick in the panel
+  beatPump: 1,                  // whole picture kicks (zoom + flash) on every beat; 0 = off (panel: BEAT PUMP)
+  beat: {                       // kick-drum beat tracker: locks onto the song's BPM and keeps time
+    sensitivity: 1.5,           // lower = catches more kicks (panel: BEAT SENS)
+    minBpm: 70, maxBpm: 180,
+  },
+};
+
+/* MediaPipe */
+const MP_VER   = '0.10.14';
+const MP_URL   = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}`;
+const MP_WASM  = `${MP_URL}/wasm`;
+const HAND_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+const POSE_MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+const SEG_MODEL  = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
+
+const SCENES = [
+  { id:'blood', name:'BLOOD', pose:'one', icon:'☝', left:'1 finger', col:'#c0141f',
+    right:[['☝ point','bleed from the wall'],['✋ palm','gush from the ceiling'],['🤏 pinch + drag','smear']] },
+  { id:'ghost', name:'GHOST', pose:'two', icon:'✌', left:'2 fingers', col:'#cfefff',
+    right:[['walk','it follows a few steps behind'],['☝ point','ghosts lean toward it'],['✋ palm','blow the smoke away'],['✌ hold','add a ghost (1→3)']] },
+  { id:'skull', name:'SKULL', pose:'three', icon:'3', left:'3 fingers', col:'#f2ead3',
+    right:[['your head','it sits on you + copies your mouth'],['mouth open 3 s','spiders / eyeballs'],['🤏 pinch','pull it off · throw'],['☝ point','it watches your finger'],['✋ palm','blow it apart'],['✌','make it chatter']] },
+  { id:'faces', name:'FACES', pose:'four', icon:'✋', left:'4 fingers', col:'#d9ff6a',
+    right:[['your hands','push through the wall'],['☝ hold','summon a face'],['✋ palm','make them scream'],['🤏 pinch','drag a face']] },
+  { id:'paint', name:'BLOOD PAINT', pose:'rock', icon:'🤘', left:'index + pinky', col:'#c0141f',
+    right:[['☝ point','paint in blood (it drips)'],['✌','eraser'],['✋ palm','splatter']] },
+  { id:'pumpkin', name:'PUMPKIN', pose:'pinky', icon:'🤙', left:'pinky only', col:'#ff9a2a',
+    right:[['☝ point','carve'],['✌','lift the knife (move without cutting)'],['✋ hold','light it + score'],['🤘 hold','next design'],['✊ hold','new pumpkin']] },
+  { id:'skeleton', name:'SKELETON', pose:'pinch', icon:'👌', left:'OK sign', col:'#7dffb2',
+    right:[['dance','it copies your whole body'],['🙌 hands up','blood rain'],['👏 clap','eyeballs'],['squat','spiders'],['jump','lightning'],['mouth open 3 s','spiders / eyeballs']] },
+];
+
+/* ---------- small helpers ---------- */
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp  = (a, b, t) => a + (b - a) * t;
+const rand  = (a, b) => a + Math.random() * (b - a);
+const mkCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w | 0); c.height = Math.max(1, h | 0); return c; };
+const hexRGB = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+function hash3(a, b, c) {
+  let n = Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263) ^ Math.imul(c | 0, 1274126177);
+  n = Math.imul(n ^ (n >>> 13), 1103515245); n ^= n >>> 16;
+  return (n >>> 0) / 4294967295;
+}
+const easeIO = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+function ell(c, x, y, rx, ry, fill) { c.fillStyle = fill; c.beginPath(); c.ellipse(x, y, Math.max(.1, rx), Math.max(.1, ry), 0, 0, Math.PI * 2); c.fill(); }
+
+/* =====================================================================
+   SCENE: BLOOD — drips run down the wall, around wherever you stand
+   ===================================================================== */
+class Blood {
+  constructor(app) { this.app = app; this.k = 0.5; this.drips = []; this.acc = 0; this.fAcc = 0; this.gushT = 0; this.pool = 6; this.dryAcc = 0; this.smear = null; }
+  resize(W, H) {
+    const old = this.bc, bw = Math.ceil(W * this.k), bh = Math.ceil(H * this.k);
+    this.bc = mkCanvas(bw, bh); this.tc = mkCanvas(bw, bh); this.gc = mkCanvas(bw, bh);
+    this.bx = this.bc.getContext('2d'); this.tx = this.tc.getContext('2d'); this.gx = this.gc.getContext('2d');
+    if (old) this.bx.drawImage(old, 0, 0, bw, bh);
+    this.mc = mkCanvas(bw, bh); this.mx = this.mc.getContext('2d');
+  }
+  enter() { this.gushT = Math.max(this.gushT, 1.0); }
+  clear() { this.bx.clearRect(0, 0, this.bc.width, this.bc.height); this.drips = []; this.pool = 4; this.gushT = 0; }
+  poolAt(x) { const t = this.app.t * 0.15; return this.pool * (0.55 + 0.25 * Math.sin(x * 0.011 + t) + 0.2 * Math.sin(x * 0.037 - t * 1.7)); }
+  spawn(x, y, big) {
+    const B = SETTINGS.blood, w = rand(B.width[0], B.width[1]) * (big ? 1.3 : 1);
+    if (this.drips.length >= B.max) this.drips.shift();
+    this.drips.push({ x, y, px: x, py: y, v: rand(B.speed[0], B.speed[1]), w, w0: w, pause: rand(0, .4), ph: Math.random() * 6.3, dir: 0 });
+  }
+  update(dt, R) {
+    if (SETTINGS.blood.sound) { this.shapes(dt, R); return; }
+    this.ambient(dt); this.hand(dt, R); this.stepDrips(dt); this.dryStep(dt, SETTINGS.blood.dry, this.pool * this.k + 4);
+  }
+  /* ---------- SOUND BLOOD: mandalas + messages that reform on the beat ---------- */
+  buildShape(kind) {
+    const app = this.app, W = app.W, H = app.H, N = SETTINGS.blood.shapeParticles;
+    let pts = [];
+    if (kind !== 'mandala') {
+      let msg = null;
+      if (kind === 'text') { const msgs = SETTINGS.blood.messages; msg = msgs[this.msgI = ((this.msgI ?? -1) + 1) % msgs.length]; }
+      const cw = Math.round(kind === 'text' ? Math.min(W * .92, 1600) : Math.min(W, H) * .86), ch = Math.round(kind === 'text' ? H * .5 : cw);
+      const c = this.tcv || (this.tcv = mkCanvas(1, 1)); c.width = cw; c.height = ch;
+      const x = c.getContext('2d', { willReadFrequently: true });
+      x.save(); x.translate(cw / 2, ch / 2); x.fillStyle = x.strokeStyle = '#fff';
+      if (kind === 'text') {
+        const font = fs => `${fs}px Creepster, Impact, "Arial Black", sans-serif`;
+        let fs = ch * .62; x.font = font(fs); const tw = x.measureText(msg).width; if (tw > cw * .95) fs *= cw * .95 / tw;
+        x.font = font(fs); x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(msg, 0, 0);
+      } else (SPOOKY[kind] || SPOOKY.skull)(x, cw / 2);
+      x.restore();
+      const d = x.getImageData(0, 0, cw, ch).data, on = (xx, y) => d[((y | 0) * cw + (xx | 0)) * 4 + 3] > 128;
+      let filled = 0; for (let y = 0; y < ch; y += 2) for (let xx = 0; xx < cw; xx += 2) if (on(xx, y)) filled++;
+      const st = Math.max(2, 2 * Math.sqrt(filled / N));      // even grid spacing that gives ~N blobs
+      for (let y = st / 2; y < ch; y += st) for (let xx = st / 2; xx < cw; xx += st) if (on(xx, y)) pts.push([xx - cw / 2, y - ch / 2]);
+      for (let tries = 0; pts.length < N * .85 && tries < N * 40; tries++) { const xx = Math.random() * cw, y = Math.random() * ch; if (on(xx, y)) pts.push([xx - cw / 2, y - ch / 2]); }   // thin lines: top up
+      this.blob = st * .62; this.spin = false; this.label = msg || kind;
+    } else {
+      // design one half-wedge, then mirror + repeat it k times = perfect symmetry
+      const R = Math.min(W, H) * .44, k = [6, 8, 10, 12][(Math.random() * 4) | 0], A = Math.PI / k, els = [];
+      const add = (len, f) => els.push({ len, f });   // f(t) -> [r, a] for t in 0..1
+      const arc = (r) => add(r * A, t => [r, t * A]);
+      const spoke = (r0, r1) => add(r1 - r0, t => [lerp(r0, r1, t), 0]);
+      const petal = (r0, r1, w) => add((r1 - r0) * 1.3, t => [lerp(r0, r1, t), Math.sin(Math.PI * t) * A * w]);
+      const dot = (r, rd, a) => add(rd * 6, t => { const u = t * Math.PI * 2; const px = r * Math.cos(a) + Math.cos(u) * rd, py = r * Math.sin(a) + Math.sin(u) * rd; return [Math.hypot(px, py), Math.atan2(py, px)]; });
+      const scallop = (r, d) => add(r * A * 1.3, t => [r + d * Math.sin(Math.PI * t), t * A]);
+      const st = (Math.random() * 4) | 0;
+      arc(R * .08); petal(R * .1, R * .45, .9); spoke(R * .5, R * .62);
+      if (st === 0) { arc(R * .5); petal(R * .5, R * .95, .55); dot(R * .82, R * .05, A); arc(R); }
+      if (st === 1) { scallop(R * .55, R * .12); petal(R * .3, R * .8, .35); arc(R * .88); dot(R * .97, R * .035, 0); }
+      if (st === 2) { arc(R * .45); scallop(R * .7, -R * .15); spoke(R * .72, R); dot(R * .6, R * .06, A); arc(R * .98); }
+      if (st === 3) { petal(R * .45, R, .75); petal(R * .45, R * .78, .4); arc(R * .4); dot(R * .3, R * .04, A); }
+      const total = els.reduce((s, e) => s + e.len, 0), M = Math.max(4, Math.round(N / (2 * k))), wedge = [];
+      for (const e of els) { const n = Math.max(2, Math.round(M * e.len / total)); for (let i = 0; i < n; i++) wedge.push(e.f((i + .5) / n)); }
+      const off = rand(0, Math.PI);
+      for (let j = 0; j < k; j++) for (const m of [1, -1]) for (const [r, a] of wedge) { const ang = off + j * 2 * A + m * a; pts.push([Math.cos(ang) * r, Math.sin(ang) * r]); }
+      this.blob = Math.max(3, Math.sqrt(2 * Math.PI * R * R * .5 / Math.max(1, pts.length)) * .45); this.spin = true; this.label = 'mandala';
+    }
+    while (pts.length < N) pts.push(pts[(Math.random() * pts.length) | 0] || [0, 0]);   // pad by doubling up
+    if (pts.length > N) { for (let i = pts.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [pts[i], pts[j]] = [pts[j], pts[i]]; } pts.length = N; }
+    for (let i = pts.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [pts[i], pts[j]] = [pts[j], pts[i]]; }   // shuffle so blood swirls across
+    return pts;
+  }
+  nextShape() {   // random from SETTINGS.blood.shapes, never the same twice in a row
+    const list = SETTINGS.blood.shapes.length ? SETTINGS.blood.shapes : ['mandala'];
+    let k; do k = list[(Math.random() * list.length) | 0]; while (list.length > 1 && k === this.lastKind);
+    this.lastKind = k; this.targets = this.buildShape(k); this.shapeT = 0; this.beats = 0;
+    const B = SETTINGS.blood, pat = B.shapeMode === 'every' ? [1] : B.shapeMode === 'hold' ? [B.holdBeats] : (B.pattern.length ? B.pattern : [1]);
+    this.patI = ((this.patI ?? -1) + 1) % pat.length; this.need = Math.max(1, pat[this.patI] | 0);   // how many beats this shape stays
+  }
+  shapes(dt, R) {
+    const B = SETTINGS.blood, app = this.app, W = app.W, H = app.H, cx = W / 2, cy = H / 2;
+    if (!this.parts || this.parts.length !== B.shapeParticles) { this.parts = Array.from({ length: B.shapeParticles }, () => ({ x: rand(0, W), y: rand(-H * .3, 0), vx: 0, vy: 0, px: 0, py: 0 })); this.nextShape(); }
+    this.shapeT += dt; this.bp = Math.max(0, (this.bp || 0) - dt * 4);
+    if (app.beatHit) {
+      this.beats++; const changing = this.beats >= (this.need || 1);
+      this.bp = changing ? .6 : 1;   // a held shape throbs harder on each beat
+      const kick = changing ? 90 : 170; for (const p of this.parts) { const dx = p.x - cx, dy = p.y - cy, d = Math.hypot(dx, dy) + 1; p.vx += dx / d * kick; p.vy += dy / d * kick; }
+    }
+    if ((app.beatHit && this.beats >= (this.need || 1)) || this.shapeT > B.shapeEvery) this.nextShape();
+    if (!this.spin && this.rot) this.rot = Math.atan2(Math.sin(this.rot), Math.cos(this.rot));   // unwind, then ease messages upright
+    this.rot = this.spin ? (this.rot || 0) + dt * (.15 + app.level * .9) : lerp(this.rot || 0, 0, 1 - Math.pow(.02, dt));
+    const sc = 1 + this.bp * ((this.need || 1) > 1 ? .2 : .1) + (app.bassEnv || 0) * .16, c = Math.cos(this.rot), s = Math.sin(this.rot), T = this.targets, t = app.t;
+    const Kp = 70 * B.morph * B.morph, damp = Math.exp(-14 * B.morph * dt);   // stiff spring: lands in ~⅓ s so it keeps up with the beat
+    for (let i = 0; i < this.parts.length; i++) {
+      const p = this.parts[i], q = T[i], tx = cx + (q[0] * c - q[1] * s) * sc + Math.sin(t * 2 + i) * .8, ty = cy + (q[0] * s + q[1] * c) * sc + Math.cos(t * 1.7 + i) * .8;
+      p.px = p.x; p.py = p.y;
+      p.vx = (p.vx + (tx - p.x) * Kp * dt) * damp; p.vy = (p.vy + (ty - p.y) * Kp * dt) * damp;
+      if (R && (R.pose === 'one' || R.pose === 'four')) { const dx = p.x - R.x, dy = p.y - R.y, d = Math.hypot(dx, dy); if (d < 160) { p.vx += dx / (d + 1) * (160 - d) * 20 * dt; p.vy += dy / (d + 1) * (160 - d) * 20 * dt; } }   // your hand pushes the blood
+      p.x += p.vx * dt; p.y += p.vy * dt;
+    }
+  }
+  drawShapes(mx) {
+    const B = SETTINGS.blood, k = this.k, r = (this.blob || 5) * B.blobSize / 7 * (1 + (this.bp || 0) * .3 + (this.app.bassEnv || 0) * .45) * k;
+    mx.clearRect(0, 0, this.mc.width, this.mc.height); mx.fillStyle = mx.strokeStyle = '#fff'; mx.lineCap = 'round'; mx.lineWidth = r * 1.7;
+    mx.beginPath(); const streak = [];
+    for (const p of this.parts || []) { if (Math.abs(p.vx) + Math.abs(p.vy) > 260) streak.push(p); else { mx.moveTo(p.x * k + r, p.y * k); mx.arc(p.x * k, p.y * k, r, 0, 6.283); } }
+    mx.fill();
+    mx.beginPath(); for (const p of streak) { mx.moveTo(p.px * k, p.py * k); mx.lineTo(p.x * k, p.y * k); } mx.stroke();   // fast-moving blood smears
+  }
+  ambient(dt) {
+    const B = SETTINGS.blood, app = this.app, W = app.W, k = this.k, bx = this.bx;
+    this.pool = Math.min(B.pool, this.pool + dt * (0.4 + (this.gushT > 0 ? 14 : 0)));
+    this.acc += dt * B.rate * (1 + app.bass * 4 * SETTINGS.audioPulse);
+    if (app.audio && app.beatHit) { this.gushT = Math.max(this.gushT, .12); for (let i = 0; i < 8; i++) { const x = Math.random() * W; this.spawn(x, this.poolAt(x) - 2, true); } }   // every beat: a burst from the ceiling
+    if (this.gushT > 0) { this.gushT -= dt; this.acc += dt * B.gushRate; }
+    while (this.acc >= 1) { this.acc--; const x = Math.random() * W; this.spawn(x, this.poolAt(x) - 2, false); }
+    bx.fillStyle = '#fff'; bx.beginPath(); bx.moveTo(0, 0);
+    for (let x = 0; x <= W + 8; x += 8) bx.lineTo(x * k, this.poolAt(x) * k);
+    bx.lineTo(W * k, 0); bx.closePath(); bx.fill();
+  }
+  hand(dt, R) {
+    const B = SETTINGS.blood, k = this.k, bx = this.bx;
+    if (!R) { this.smear = null; return; }
+    if (R.pose === 'one') {
+      this.fAcc += dt * B.fingerRate;
+      while (this.fAcc >= 1) { this.fAcc--; this.spawn(R.x + rand(-10, 10), R.y + rand(-6, 6), true); }
+      bx.fillStyle = '#fff'; bx.beginPath();
+      for (let i = 0; i < 3; i++) { const a = rand(0, 6.3), r = rand(0, 16); bx.moveTo((R.x + Math.cos(a) * r) * k, (R.y + Math.sin(a) * r) * k); bx.arc((R.x + Math.cos(a) * r) * k, (R.y + Math.sin(a) * r) * k, rand(1, 5) * k, 0, 6.3); }
+      bx.fill();
+    }
+    if (R.pose === 'four' && R.held > 0.1) this.gushT = Math.max(this.gushT, 0.25);
+    if (R.pose === 'pinch') {
+      if (this.smear) {
+        bx.save(); bx.globalAlpha = 0.45; bx.lineCap = 'round'; bx.strokeStyle = '#fff';
+        for (let i = 0; i < 4; i++) { const o = (i - 1.5) * 7; bx.lineWidth = rand(4, 10) * k; bx.beginPath(); bx.moveTo(this.smear.x * k, (this.smear.y + o) * k); bx.lineTo(R.x * k, (R.y + o) * k); bx.stroke(); }
+        bx.restore();
+        if (Math.random() < dt * 6) this.spawn(R.x + rand(-14, 14), R.y + 10, false);
+      }
+      this.smear = { x: R.x, y: R.y };
+    } else this.smear = null;
+  }
+  stepDrips(dt) {
+    const B = SETTINGS.blood, app = this.app, H = app.H, k = this.k, bx = this.bx;
+    bx.strokeStyle = '#fff'; bx.lineCap = 'round';
+    const hasMask = this.avoid !== false && !!app.maskNow;
+    for (let i = this.drips.length - 1; i >= 0; i--) {
+      const d = this.drips[i];
+      if (d.pause > 0) { d.pause -= dt; d.w = Math.min(d.w0 * 1.25, d.w + dt * 2); continue; }
+      if (Math.random() < dt * B.stick) d.pause = rand(.08, .7);
+      let v = d.v * (0.7 + 0.6 * Math.abs(Math.sin(app.t * 1.3 + d.ph)));
+      if (hasMask && app.maskAt(d.x, d.y + d.w * 2) > .5) {
+        // blocked by you: slip round your edge without painting, then carry on down
+        if (!d.dir) d.dir = app.edgeDir(d.x, d.y + d.w * 2);
+        d.x += d.dir * B.slide * dt; d.y += v * .15 * dt; d.px = d.x; d.py = d.y; d.hidden = true;
+        continue;
+      } else if (d.hidden) { d.hidden = false; d.dir = 0; d.px = d.x; d.py = d.y; }
+      d.y += v * dt;
+      d.x += Math.sin(d.ph + d.y * 0.02) * dt * 5;
+      d.w -= dt * B.thin;
+      bx.lineWidth = Math.max(0.7, d.w * 0.55) * k;
+      bx.beginPath(); bx.moveTo(d.px * k, d.py * k); bx.lineTo(d.x * k, d.y * k); bx.stroke();
+      d.px = d.x; d.py = d.y;
+      if (d.w < 0.9 || d.y > H + 20) {
+        bx.beginPath(); bx.arc(d.x * k, d.y * k, Math.max(1, d.w) * k, 0, 6.3); bx.fillStyle = '#fff'; bx.fill();
+        this.drips.splice(i, 1);
+      }
+    }
+  }
+  dryStep(dt, rate, top) {
+    // old blood dries away slowly (stepped so 8-bit alpha actually moves)
+    this.dryAcc += dt; if (this.dryAcc < 1.5) return;
+    if (rate > 0) { const bx = this.bx; bx.save(); bx.globalCompositeOperation = 'destination-out'; bx.fillStyle = `rgba(0,0,0,${clamp(rate * this.dryAcc, 0, 1)})`; bx.fillRect(0, top, this.bc.width, this.bc.height); bx.restore(); }
+    this.dryAcc = 0;
+  }
+  draw(ctx) {
+    const B = SETTINGS.blood, app = this.app, W = app.W, H = app.H, tx = this.tx, gx = this.gx, s = 1.6;
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    let src = this.bc;
+    if (B.sound && this.avoid !== false) { this.drawShapes(this.mx); src = this.mc; }
+    tx.globalCompositeOperation = 'copy'; tx.drawImage(src, 0, 0);
+    tx.globalCompositeOperation = 'source-in'; tx.fillStyle = B.colour; tx.fillRect(0, 0, this.tc.width, this.tc.height);
+    gx.globalCompositeOperation = 'copy'; gx.drawImage(src, 0, 0);
+    gx.globalCompositeOperation = 'destination-out'; gx.drawImage(src, s, s);
+    gx.globalCompositeOperation = 'source-in'; gx.fillStyle = B.gloss; gx.fillRect(0, 0, this.gc.width, this.gc.height);
+    tx.globalCompositeOperation = gx.globalCompositeOperation = 'source-over';
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(this.tc, 0, 0, W, H);
+    if (app.audio && app.pulse > .02) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = app.pulse * .55; ctx.drawImage(this.tc, 0, 0, W, H); ctx.restore(); }   // blood flares on the beat
+    ctx.globalAlpha = 0.8; ctx.drawImage(this.gc, 0, 0, W, H); ctx.globalAlpha = 1;
+    // live drip heads (teardrop beads + a glint)
+    ctx.fillStyle = B.bead; ctx.beginPath();
+    for (const d of this.drips) { if (d.hidden) continue; const r = Math.max(1, d.w * .62); ctx.moveTo(d.x + r, d.y + r * .3); ctx.ellipse(d.x, d.y + r * .3, r, r * 1.25, 0, 0, 6.3); }
+    ctx.fill();
+    ctx.fillStyle = B.gloss; ctx.beginPath();
+    for (const d of this.drips) { if (d.w < 3) continue; const r = d.w * .16; ctx.moveTo(d.x - d.w * .2 + r, d.y); ctx.arc(d.x - d.w * .2, d.y, r, 0, 6.3); }
+    ctx.fill();
+  }
+}
+
+/* =====================================================================
+   SCENE: BLOOD PAINT — paint with your finger; every stroke drips
+   ===================================================================== */
+class BloodPaint extends Blood {
+  constructor(app) { super(app); this.avoid = false; }   // paint runs straight down, no shadow around you
+  enter() {}
+  clear() { super.clear(); this.pool = 0; }
+  update(dt, R) { this.paint(dt, R); this.stepDrips(dt); this.dryStep(dt, SETTINGS.paint.dry, 0); }
+  paint(dt, R) {
+    const P = SETTINGS.paint, k = this.k, bx = this.bx;
+    if (R && R.pose === 'one') {
+      const p = { x: R.x, y: R.y };
+      bx.fillStyle = bx.strokeStyle = '#fff'; bx.lineCap = bx.lineJoin = 'round';
+      if (this.last) {
+        const dist = Math.hypot(p.x - this.last.x, p.y - this.last.y);
+        this.bw = lerp(this.bw || P.brush, P.brush * clamp(1.25 - dist / 120, .45, 1.25), .3);   // fast = thinner
+        bx.lineWidth = this.bw * k; bx.beginPath(); bx.moveTo(this.last.x * k, this.last.y * k); bx.lineTo(p.x * k, p.y * k); bx.stroke();
+        bx.lineWidth = this.bw * .45 * k; bx.beginPath(); bx.moveTo((this.last.x + rand(-4, 4)) * k, (this.last.y + this.bw * .3) * k); bx.lineTo((p.x + rand(-4, 4)) * k, (p.y + this.bw * .3) * k); bx.stroke();
+        this.dAcc = (this.dAcc || 0) + dist / P.dripEvery;
+        while (this.dAcc >= 1) { this.dAcc--; const t = Math.random(); this.spawn(lerp(this.last.x, p.x, t) + rand(-this.bw * .3, this.bw * .3), lerp(this.last.y, p.y, t) + this.bw * .35, false); }
+        if (dist < 2) { this.still = (this.still || 0) + dt; if (this.still > .5) { this.still = 0; this.spawn(p.x + rand(-4, 4), p.y + this.bw * .4, true); } }
+      } else { bx.beginPath(); bx.arc(p.x * k, p.y * k, P.brush * .6 * k, 0, 6.3); bx.fill(); }
+      this.last = p;
+    } else this.last = null;
+    if (R && R.pose === 'two') {
+      bx.save(); bx.globalCompositeOperation = 'destination-out'; bx.beginPath(); bx.arc(R.x * k, R.y * k, P.eraser * k, 0, 6.3); bx.fill(); bx.restore();
+      this.drips = this.drips.filter(d => Math.hypot(d.x - R.x, d.y - R.y) > P.eraser);
+      this.eraser = { x: R.x, y: R.y };
+    } else this.eraser = null;
+    if (R && R.pose === 'four' && R.started) this.splat(R.x, R.y);
+  }
+  splat(x, y) {
+    const k = this.k, bx = this.bx, s = SETTINGS.paint.splat;
+    bx.fillStyle = '#fff'; bx.beginPath();
+    for (let i = 0; i < 9; i++) { const a = rand(0, 6.3), r = rand(0, 26) * s, px = (x + Math.cos(a) * r) * k, py = (y + Math.sin(a) * r) * k; bx.moveTo(px, py); bx.arc(px, py, rand(10, 24) * s * k, 0, 6.3); }
+    for (let i = 0; i < 28; i++) { const a = rand(0, 6.3), r = rand(40, 200) * s, px = (x + Math.cos(a) * r) * k, py = (y + Math.sin(a) * r) * k; bx.moveTo(px, py); bx.arc(px, py, rand(1.5, 7) * s * k, 0, 6.3); }
+    bx.fill();
+    for (let i = 0; i < 7; i++) this.spawn(x + rand(-30, 30) * s, y + rand(10, 30) * s, true);
+  }
+  draw(ctx) {
+    super.draw(ctx);
+    if (this.eraser) { ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(this.eraser.x, this.eraser.y, SETTINGS.paint.eraser, 0, 6.3); ctx.stroke(); }
+  }
+}
+
+/* =====================================================================
+   SCENE: GHOST — your shadow lags; a smoky ghost of you drifts behind
+   ===================================================================== */
+class Ghost {
+  constructor(app) {
+    this.app = app; this.count = SETTINGS.ghost.count; this.scatter = 0; this.parts = []; this.lean = { x: 0, y: 0 }; this.twoDone = false; this.acc = [0, 0, 0];
+    this.fog = Array.from({ length: 7 }, () => ({ x: Math.random(), y: rand(.2, 1), r: rand(.25, .55), s: rand(.01, .03) * (Math.random() < .5 ? -1 : 1) }));
+  }
+  resize(W, H) { this.k = .35; this.sc = mkCanvas(W * this.k, H * this.k); this.sx = this.sc.getContext('2d'); }
+  enter() { this.scatter = 0; }
+  clear() { this.blow(this.app.W / 2, this.app.H / 2, 500); this.count = 1; }
+  blow(x, y, power) {
+    for (const p of this.parts) { const dx = p.x - x, dy = p.y - y, d = Math.hypot(dx, dy) + 40; p.vx += dx / d * power * rand(.5, 1.2); p.vy += dy / d * power * rand(.5, 1.2); p.decay *= 1.6; }
+    this.scatter = 1;
+  }
+  inside(f) {   // indices of mask pixels that are "you", cached per frame
+    if (f.ins) return f.ins;
+    const thr = SETTINGS.mask.threshold * 255, out = []; for (let i = 0; i < f.u8.length; i++) if (f.u8[i] > thr) out.push(i);
+    return f.ins = out;
+  }
+  place(f, g) {   // ghost g stands behind you: off to the side you came from, a bit smaller and higher (further away)
+    const app = this.app, G = SETTINGS.ghost, r = app.camRect(), sc = Math.pow(G.behindScale, g + 1), foot = app.m2s(f.cx, f.bottom >= 0 ? f.bottom : app.mh - 1);
+    return { sc, fx: foot.x, fy: foot.y, ox: (this.fo || 0) * (1 + g * .8) + this.lean.x * (1 + g * .4), oy: this.lean.y - (1 - sc) * r.h * .25 + Math.sin(app.t * 1.2 + g) * 6 };
+  }
+  update(dt, R) {
+    const G = SETTINGS.ghost, app = this.app, t = app.t;
+    this.scatter = Math.max(0, this.scatter - dt / G.reform);
+    let tx = 0, ty = 0; const fn = app.maskNow;
+    if (R && R.pose === 'one' && fn && fn.n > 30) { const c = app.m2s(fn.cx, fn.cy); tx = (R.x - c.x) * G.lean; ty = (R.y - c.y) * G.lean * .5; }
+    this.lean.x = lerp(this.lean.x, tx, 1 - Math.pow(.05, dt)); this.lean.y = lerp(this.lean.y, ty, 1 - Math.pow(.05, dt));
+    if (R && R.pose === 'four' && R.started) this.blow(R.x, R.y, G.blowPower);
+    if (R && R.pose === 'two' && R.held > .6 && !this.twoDone) { this.twoDone = true; this.count = this.count % 3 + 1; app.toast(`${this.count} GHOST${this.count > 1 ? 'S' : ''}`); }
+    if (!R || R.pose !== 'two') this.twoDone = false;
+    // which way are you walking? the ghost keeps to the side you came from
+    if (fn && fn.n > 30) {
+      const c = app.m2s(fn.cx, fn.cy);
+      if (this.pcx != null) { this.pvx = lerp(this.pvx || 0, (c.x - this.pcx) / Math.max(dt, .01), .1); if (Math.abs(this.pvx) > 60) { this.flipT = (Math.sign(this.pvx) === -this.side) ? 0 : (this.flipT || 0) + dt; if (this.flipT > .6) { this.side = -Math.sign(this.pvx); this.flipT = 0; } } }
+      this.pcx = c.x;
+    }
+    this.side = this.side || -1;
+    this.fo = lerp(this.fo || 0, this.side * G.follow * app.W, 1 - Math.pow(.5, dt));
+    // breathe smoke out of where you were a moment ago
+    const r = app.camRect(), mw = app.mw, mh = app.mh, P = this.parts;
+    for (let g = 0; g < this.count; g++) {
+      const f = app.frameAt(G.delays[g] || G.delays[0] * (g + 1)); if (!f || f.n < 30) { this.acc[g] = 0; continue; }
+      const ins = this.inside(f); if (!ins.length) continue;
+      this.acc[g] += dt * G.spawn * (1 - this.scatter * .95) * (1 - g * .25) * (1 + (app.pulse || 0) * 2.5);
+      const T = this.place(f, g);
+      while (this.acc[g] >= 1 && P.length < G.max) {
+        this.acc[g]--;
+        const idx = ins[(Math.random() * ins.length) | 0], mx = idx % mw, my = (idx / mw) | 0;
+        const x0 = r.x + (mx + Math.random()) / mw * r.w, y0 = r.y + (my + Math.random()) / mh * r.h;
+        P.push({ x: T.fx + (x0 - T.fx) * T.sc + T.ox, y: T.fy + (y0 - T.fy) * T.sc + T.oy, vx: rand(-6, 6), vy: rand(-12, 0), life: 1, decay: 1 / rand(G.life * .6, G.life * 1.3), s: rand(.7, G.size) });
+      }
+      this.acc[g] = Math.min(this.acc[g], 1);
+    }
+    if (app.audio && app.beatHit) for (const p of this.parts) { const a = Math.random() * 6.283, v = rand(20, 90); p.vx += Math.cos(a) * v; p.vy += Math.sin(a) * v - 30; }   // smoke puffs out on the beat
+    // drift: slow curling flow + rise
+    let w = 0; const damp = Math.pow(.25, dt);
+    for (let i = 0; i < P.length; i++) {
+      const p = P[i]; p.life -= p.decay * dt; if (p.life <= 0) continue;
+      const a = Math.sin(p.x * .007 + t * .5) + Math.cos(p.y * .009 - t * .4) + Math.sin((p.x + p.y) * .004 + t * .3);
+      p.vx = (p.vx + Math.cos(a * 2.2) * G.curl * dt) * damp; p.vy = (p.vy + (Math.sin(a * 2.2) * G.curl - G.rise) * dt) * damp;
+      p.x += p.vx * dt; p.y += p.vy * dt; P[w++] = p;
+    }
+    P.length = w;
+    for (const b of this.fog) { b.x += b.s * dt; if (b.x < -.6) b.x = 1.6; if (b.x > 1.6) b.x = -.6; }
+  }
+  draw(ctx) {
+    const G = SETTINGS.ghost, app = this.app, W = app.W, H = app.H;
+    ctx.fillStyle = G.wall; ctx.fillRect(0, 0, W, H);
+    for (const b of this.fog) {
+      const g = ctx.createRadialGradient(b.x * W, b.y * H, 0, b.x * W, b.y * H, b.r * W);
+      g.addColorStop(0, G.fog); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    }
+    const vg = ctx.createRadialGradient(W / 2, H / 2, H * .3, W / 2, H / 2, Math.hypot(W, H) * .6);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.75)'); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+    const r = app.camRect();
+    // your lagging shadow
+    const sf = app.frameAt(G.shadowDelay);
+    if (sf) { ctx.save(); ctx.filter = `blur(${G.shadowBlur}px)`; ctx.globalAlpha = G.shadowAlpha; ctx.drawImage(app.maskCanvas(sf, 'shadow', [0, 0, 0]), r.x + G.shadowOffsetX, r.y + G.shadowOffsetY, r.w, r.h); ctx.restore(); }
+    // smoke: particles accumulate softly at low res, then get blurred up
+    const P = this.parts, k = this.k, sx = this.sx, col = G.colour, lv = [[], [], [], []];
+    for (const p of P) { const a = Math.min(1, (1 - p.life) * 6) * p.life; lv[clamp(a * 4 | 0, 0, 3)].push(p); }
+    sx.globalCompositeOperation = 'destination-out'; sx.fillStyle = `rgba(0,0,0,${G.smokeFade})`; sx.fillRect(0, 0, this.sc.width, this.sc.height);
+    sx.globalCompositeOperation = 'lighter'; sx.fillStyle = col;
+    for (let L = 0; L < 4; L++) { sx.globalAlpha = (L + 1) / 4 * G.smoke; for (const p of lv[L]) sx.fillRect(p.x * k - 1, p.y * k - 1, 2, 2); }
+    sx.globalAlpha = 1; sx.globalCompositeOperation = 'source-over';
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const f0 = app.frameAt(G.delays[0]);
+    if (f0 && f0.n > 30 && G.body > 0) { ctx.filter = 'blur(26px)'; ctx.globalAlpha = clamp(G.body * (1 - this.scatter) * (1 + (app.pulse || 0) * 2.5), 0, 1); const T = this.place(f0, 0); ctx.drawImage(app.maskCanvas(f0, 'gbody', hexRGB(col)), T.fx + (r.x - T.fx) * T.sc + T.ox, T.fy + (r.y - T.fy) * T.sc + T.oy, r.w * T.sc, r.h * T.sc); }
+    ctx.globalAlpha = 1; ctx.filter = `blur(${G.smokeBlur}px)`; ctx.drawImage(this.sc, 0, 0, W, H);
+    ctx.globalAlpha = .6; ctx.filter = `blur(${G.smokeBlur * .3}px)`; ctx.drawImage(this.sc, 0, 0, W, H);
+    ctx.filter = 'none'; ctx.fillStyle = col;
+    for (let L = 0; L < 4; L++) { ctx.globalAlpha = clamp((L + 1) / 4 * G.motes * (1 + (app.pulse || 0)), 0, 1); for (const p of lv[L]) ctx.fillRect(p.x, p.y, p.s, p.s); }
+    ctx.restore();
+    // hollow eye smudges in the smoke
+    if (G.eyes && f0 && f0.top >= 0 && f0.n > 30 && this.scatter < .9) {
+      const T = this.place(f0, 0), hh = (f0.bottom - f0.top) * .13, c0 = app.m2s(f0.hx, f0.top + hh * .55), sp = (r.w / app.mw) * hh * .3 * T.sc, es = sp * .5;
+      const c = { x: T.fx + (c0.x - T.fx) * T.sc + T.ox - this.lean.x, y: T.fy + (c0.y - T.fy) * T.sc + T.oy - this.lean.y };
+      ctx.save(); ctx.filter = `blur(${Math.max(2, es * .45)}px)`; ctx.fillStyle = `rgba(0,0,0,${.6 * (1 - this.scatter)})`;
+      ell(ctx, c.x - sp + this.lean.x, c.y + this.lean.y, es * .7, es, ctx.fillStyle); ell(ctx, c.x + sp + this.lean.x, c.y + this.lean.y, es * .7, es, ctx.fillStyle);
+      ell(ctx, c.x + this.lean.x, c.y + sp * 1.5 + this.lean.y, es * .45, es * (.8 + .3 * Math.sin(app.t * 2)), ctx.fillStyle);
+      ctx.restore();
+    }
+  }
+}
+
+/* =====================================================================
+   SCENE: SKULL — a pixel skull you grab, throw, blow apart
+   ===================================================================== */
+const SKULL_ART = [
+  '......##########......',
+  '....##############....',
+  '...################...',
+  '..##################..',
+  '.####################.',
+  '.####################.',
+  '######################',
+  '######################',
+  '###oooooo####oooooo###',
+  '##oooooooo##oooooooo##',
+  '##oooooooo##oooooooo##',
+  '##oooooooo##oooooooo##',
+  '###oooooo#nn#oooooo###',
+  '.#########nn#########.',
+  '..#######nnnn#######..',
+  '...################...',
+  '....TT.TT.TT.TT.TT....',
+  '....tt.tt.tt.tt.tt....',
+  '...JJJJJJJJJJJJJJJJ...',
+  '....JJJJJJJJJJJJJJ....',
+  '......JJJJJJJJJJ......',
+];
+const SKULL_CRACK = [[1, 14], [2, 13], [3, 13], [3, 14], [4, 15], [5, 14], [2, 6], [3, 7]];
+
+class Skull {
+  constructor(app) {
+    this.app = app; this.loose = 0; this.grab = null; this.jaw = 0; this.chatT = 0; this.palmCD = 0;
+    this.s = { x: 0, y: 0, vx: 0, vy: 0, rot: 0 }; this.look = { x: 0, y: 0 }; this.scale = 1;
+    const A = SKULL_ART, rows = A.length, cols = A[0].length, solid = (r, c) => r >= 0 && r < rows && c >= 0 && c < cols && '#TtJ'.includes(A[r][c]);
+    this.px = [];
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const ch = A[r][c]; if (!solid(r, c)) continue;
+      let shade = r > 12 ? 1 : 0;
+      if (!solid(r + 1, c) || !solid(r, c + 1)) shade = 2;
+      if (ch === 'T' || ch === 't') shade = 0;
+      if (SKULL_CRACK.some(([a, b]) => a === r && b === c)) shade = 3;
+      const sub = SETTINGS.skull.sub;   // split each pixel into tiny particles
+      for (let i = 0; i < sub; i++) for (let j = 0; j < sub; j++)
+        this.px.push({ r: r + (j + .5) / sub - .5 + rand(-.06, .06), c: c + (i + .5) / sub - .5 + rand(-.06, .06), jaw: ch === 't' || ch === 'J', shade, x: 0, y: 0, vx: 0, vy: 0 });
+    }
+    this.cols = cols; this.rows = rows;
+  }
+  resize(W, H) { this.sc = mkCanvas(W, H); this.scx = this.sc.getContext('2d'); if (!this.placed) this.place(); }
+  place() { this.placed = true; const s = this.s; s.x = this.app.W / 2; s.y = this.app.H / 2; s.vx = s.vy = 0; s.rot = 0; for (const p of this.px) { p.x = s.x + rand(-600, 600); p.y = s.y + rand(-500, 500); p.vx = p.vy = 0; } this.loose = .6; }
+  enter() { if (!this.placed) this.place(); }
+  clear() { this.place(); this.scale = 1; this.hist = []; }
+  explode(x, y, power) {
+    for (const p of this.px) { const dx = p.x - x, dy = p.y - y, d = Math.hypot(dx, dy) + 20, sp = rand(.5, 1) * power; p.vx += dx / d * sp + rand(-3, 3); p.vy += dy / d * sp + rand(-3, 3); }
+    this.loose = 1;
+  }
+  update(dt, R) {
+    const K = SETTINGS.skull, app = this.app, s = this.s, W = app.W, H = app.H;
+    this.palmCD -= dt; this.freeT = Math.max(0, (this.freeT || 0) - dt);
+    const head = K.followHead ? app.headInfo() : null;
+    const onHead = !!head && !this.grab && this.freeT <= 0;
+    this.curPx = lerp(this.curPx || K.pixel * this.scale, onHead ? clamp(head.px * K.headScale, 3, H / 16) : K.pixel * this.scale, 1 - Math.pow(.02, dt));
+    const px = this.curPx;
+    // pinch = pull it off your head, move, throw
+    if (R && R.pose === 'pinch') {
+      if (!this.grab && Math.hypot(R.x - s.x, R.y - s.y) < px * 14) this.grab = { dx: s.x - R.x, dy: s.y - R.y };
+      if (this.grab) {
+        const nx = R.x + this.grab.dx, ny = R.y + this.grab.dy;
+        s.vx = lerp(s.vx, (nx - s.x) / Math.max(dt, .008), .4); s.vy = lerp(s.vy, (ny - s.y) / Math.max(dt, .008), .4);
+        s.x = nx; s.y = ny;
+      }
+    } else if (this.grab) { this.grab = null; this.freeT = K.freeTime; }
+    if (onHead) {
+      const ff = 1 - Math.pow(.0005, dt); s.vx = s.vy = 0;
+      s.x = lerp(s.x, head.x, ff); s.y = lerp(s.y, head.y, ff);
+    } else if (!this.grab) {
+      s.x += s.vx * dt; s.y += s.vy * dt; const f = Math.pow(.4, dt); s.vx *= f; s.vy *= f;
+      const m = px * 10;
+      if (s.x < m) { s.x = m; s.vx = Math.abs(s.vx) * .6; } if (s.x > W - m) { s.x = W - m; s.vx = -Math.abs(s.vx) * .6; }
+      if (s.y < m) { s.y = m; s.vy = Math.abs(s.vy) * .6; } if (s.y > H - m) { s.y = H - m; s.vy = -Math.abs(s.vy) * .6; }
+      if (Math.hypot(s.vx, s.vy) > K.breakSpeed && this.loose < .3) { this.explode(s.x - s.vx * .02, s.y - s.vy * .02, 14); app.toast('SHATTERED'); }
+    }
+    // palm = blow apart (it reassembles on your head)
+    if (R && R.pose === 'four' && R.held > .12 && this.palmCD <= 0) { this.explode(R.x, R.y, 30); this.palmCD = 1.2; }
+    // look target
+    let lx, ly;
+    if (R && (R.pose === 'one' || R.pose === 'pinch')) { lx = R.x; ly = R.y; }
+    else if (onHead) { lx = s.x; ly = s.y + 60; }
+    else if (head) { lx = head.x; ly = head.y; }
+    else { lx = s.x + Math.sin(app.t * .7) * 300; ly = s.y + Math.cos(app.t * .5) * 120; }
+    const dx = lx - s.x, dy = ly - s.y, dl = Math.hypot(dx, dy) + 1;
+    this.look.x = lerp(this.look.x, dx / dl * Math.min(1, dl / 300), .15); this.look.y = lerp(this.look.y, dy / dl * Math.min(1, dl / 300), .15);
+    const rotT = onHead ? head.roll : clamp(s.vx * .00035, -.5, .5) + this.look.x * .12 + Math.sin(app.t * .9) * .04;
+    s.rot = lerp(s.rot, rotT, 1 - Math.pow(onHead ? .0005 : .02, dt));
+    // jaw: copies your mouth when it can see your face
+    let jawT;
+    if (onHead && head.jaw != null) jawT = clamp((head.jaw - .04) * 2.4, 0, 1);
+    else {
+      this.chatT -= dt; if (Math.random() < dt * .25) this.chatT = rand(.4, 1.2);
+      jawT = this.chatT > 0 ? .5 + .5 * Math.sin(app.t * 28) : .05;
+      jawT = Math.max(jawT, clamp(app.level * 4, 0, 1), app.bass * SETTINGS.audioPulse);
+    }
+    if (R && R.pose === 'two') jawT = .5 + .5 * Math.sin(app.t * 28);
+    this.jaw = lerp(this.jaw, jawT, .5);
+    this.onHead = onHead;
+    this.loose = Math.max(0, this.loose - dt / K.reassemble);
+    // pixels spring home
+    const c = Math.cos(s.rot), sn = Math.sin(s.rot), bob = onHead ? 0 : Math.sin(app.t * 1.6) * px * .6;
+    const k = K.spring * Math.pow(1 - this.loose, 2), damp = Math.pow(K.damp, dt * 60), f = dt * 60, cx = (this.cols - 1) / 2, cy = (this.rows - 1) / 2;
+    const pa = px * (1 + ((app.pulse || 0) * .2 + app.level * .05) * K.audio);   // kicks on the beat
+    for (const p of this.px) {
+      const hx = (p.c - cx) * pa, hy = (p.r - cy) * pa + (p.jaw ? this.jaw * K.jawDrop * pa : 0);
+      const tx = s.x + hx * c - hy * sn, ty = s.y + bob + hx * sn + hy * c;
+      p.vx = (p.vx + (tx - p.x) * k * f) * damp; p.vy = (p.vy + (ty - p.y) * k * f + this.loose * K.gravity * dt * .02 * f) * damp;
+      p.x += p.vx * f; p.y += p.vy * f;
+    }
+    this.tf = { c, sn, bob, px: pa, cx, cy };
+    // mouth held open → spiders / eyeballs pour out
+    const holding = (onHead && head.jaw != null && this.jaw > .45) || (R && R.pose === 'two');   // your real mouth open, or ✌ chatter held
+    if (holding && this.loose < .3) {
+      this.openT = (this.openT || 0) + dt;
+      if (this.openT > K.mouthHold) { const hy = (17 - cy + this.jaw * K.jawDrop) * pa; app.fx.spew('skull', s.x - hy * sn, s.y + bob + hy * c, dt); }
+    } else this.openT = Math.max(0, (this.openT || 0) - dt * 2);
+  }
+  draw(ctx) {
+    const K = SETTINGS.skull, app = this.app, W = app.W, H = app.H, s = this.s, T = this.tf; if (!T) return;
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    const sz = T.px / K.sub, half = sz / 2, d = Math.max(.8, sz * .82), x = this.scx;
+    x.clearRect(0, 0, W, H);
+    for (let sh = 0; sh < 4; sh++) {
+      x.fillStyle = K.bone[sh];
+      for (const p of this.px) if (p.shade === sh) x.fillRect(p.x - half, p.y - half, d, d);
+    }
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.filter = `blur(${Math.max(3, T.px * .7)}px)`;
+    ctx.globalAlpha = clamp(K.glow * (1 + (app.pulse || 0) * 1.6 * K.audio), 0, 1); ctx.drawImage(this.sc, 0, 0); ctx.restore();
+    ctx.drawImage(this.sc, 0, 0);
+    // glowing pupils (follow the skull, fade while it's in pieces)
+    const a = 1 - this.loose; if (a < .05) return;
+    const pz = T.px, ph = pz / 2, gap = Math.max(1, pz * .08);
+    ctx.save(); ctx.globalAlpha = a * (0.75 + 0.25 * Math.sin(app.t * 5)); ctx.fillStyle = K.eye; ctx.shadowColor = K.eye; ctx.shadowBlur = pz * 2.5;
+    for (const ec of [5.5, 15.5]) {
+      for (const [ox, oy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+        const hx = (ec - .5 + ox + this.look.x * 2.4 - T.cx) * pz, hy = (9.5 + oy + this.look.y * 1.2 - T.cy) * pz;
+        ctx.fillRect(s.x + hx * T.c - hy * T.sn - ph, s.y + T.bob + hx * T.sn + hy * T.c - ph, pz - gap, pz - gap);
+      }
+    }
+    ctx.restore();
+  }
+}
+
+/* =====================================================================
+   SCENE: FACES — faces push out through the wall like it's a membrane
+   ===================================================================== */
+class Faces {
+  constructor(app) { this.app = app; this.faces = []; this.spawnT = 1; this.summoned = false; this.grab = null; }
+  resize(W, H) {
+    const F = SETTINGS.faces; this.fw = Math.max(64, Math.round(W * F.res)); this.fh = Math.max(36, Math.round(H * F.res));
+    this.hc = mkCanvas(this.fw, this.fh); this.hx = this.hc.getContext('2d', { willReadFrequently: true });
+    this.oc = mkCanvas(this.fw, this.fh); this.ox = this.oc.getContext('2d'); this.out = this.ox.createImageData(this.fw, this.fh);
+    this.makeWall();
+  }
+  makeWall() {
+    const w = this.fw, h = this.fh, T = this.tex = new Float32Array(w * h);
+    const oct = (sc, amp) => { const gw = Math.ceil(w / sc) + 2, gh = Math.ceil(h / sc) + 2, g = new Float32Array(gw * gh).map(() => Math.random());
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const fx = x / sc, fy = y / sc, ix = fx | 0, iy = fy | 0, ax = fx - ix, ay = fy - iy;
+        const a = g[iy * gw + ix], b = g[iy * gw + ix + 1], c = g[(iy + 1) * gw + ix], d = g[(iy + 1) * gw + ix + 1];
+        T[y * w + x] += amp * lerp(lerp(a, b, ax), lerp(c, d, ax), ay); } };
+    oct(w / 4, .45); oct(w / 14, .3); oct(5, .18); oct(2, .1);
+    for (let x = 0; x < w; x++) { const s = Math.random() < .08 ? rand(.05, .18) : 0; if (!s) continue; const len = rand(.2, .9) * h; for (let y = 0; y < len; y++) T[y * w + x] -= s * (1 - y / len); }
+    for (let k = 0; k < 7; k++) { let x = rand(0, w), y = rand(0, h), a = rand(0, 6.3); for (let i = 0; i < rand(20, 90); i++) { a += rand(-.6, .6); x += Math.cos(a); y += Math.sin(a); const j = (y | 0) * w + (x | 0); if (j >= 0 && j < T.length) T[j] -= .3; } }
+    for (let i = 0; i < T.length; i++) T[i] = .35 + T[i] * .55;
+  }
+  spawn(x, y, fast) {
+    const F = SETTINGS.faces, H = this.app.H;
+    this.faces.push({ x, y, tx: x, ty: y, size: rand(F.size[0], F.size[1]) * H, ph: 'in', t: 0, e: 0, dur: fast ? 1.4 : F.emerge * rand(.8, 1.3),
+      hold: rand(F.hold[0], F.hold[1]), mouth: 0, scream: 0, glow: .2, look: { x: 0, y: 0 }, tilt: rand(-.25, .25),
+      wid: rand(.85, 1.1), len: rand(.95, 1.25), eyeSp: rand(.23, .3), eyeS: rand(.85, 1.25), seed: Math.random() * 100, twitch: 0 });
+  }
+  pickSpot() {
+    const app = this.app, W = app.W, H = app.H;
+    for (let i = 0; i < 30; i++) {
+      const x = rand(.1, .9) * W, y = rand(.15, .8) * H;
+      if (this.faces.some(f => Math.hypot(f.x - x, f.y - y) < f.size * 2.4)) continue;
+      if (app.maskNow && app.maskAt(x, y) > .3) continue;
+      return [x, y];
+    }
+    return null;
+  }
+  enter() { this.spawnT = .3; }
+  clear() { for (const f of this.faces) if (f.ph !== 'out') { f.ph = 'out'; f.t = 0; f.outDur = 1; f.e0 = f.e; } }
+  update(dt, R) {
+    const F = SETTINGS.faces, app = this.app;
+    this.spawnT -= dt;
+    if (this.spawnT <= 0) { this.spawnT = F.spawnEvery * rand(.6, 1.4) * (app.audio && F.beat ? .35 : 1); /* with music the wall fills up faster */ if (this.faces.filter(f => !f.anchor).length < F.max) { const p = this.pickSpot(); if (p) this.spawn(p[0], p[1]); } }
+    // right hand
+    if (R && R.pose === 'one' && R.held > .45 && !this.summoned) { this.summoned = true; if (this.faces.length < F.max + 2) this.spawn(R.x, R.y, true); }
+    if (!R || R.pose !== 'one') this.summoned = false;
+    if (R && R.pose === 'four' && R.started) {
+      let any = false; for (const f of this.faces) if (f.ph !== 'out' && f.e > .2) { f.scream = 1.3; any = true; }
+      if (!any) for (let i = 0; i < 2; i++) { const p = this.pickSpot(); if (p) { this.spawn(p[0], p[1], true); this.faces[this.faces.length - 1].scream = 2.2; } }
+    }
+    if (R && R.pose === 'pinch') {
+      if (!this.grab) { let best = null, bd = 1e9; for (const f of this.faces) { const d = Math.hypot(f.x - R.x, f.y - R.y); if (d < f.size * 1.2 && d < bd && f.ph !== 'out' && !f.anchor) { bd = d; best = f; } } if (best) this.grab = { f: best, dx: best.x - R.x, dy: best.y - R.y }; }
+      if (this.grab) { const f = this.grab.f; f.x = R.x + this.grab.dx; f.y = R.y + this.grab.dy; if (f.ph === 'hold') f.t = Math.min(f.t, f.hold - 1); }
+    } else this.grab = null;
+    // optional: a face that follows your head
+    const want = {};
+    const m = app.maskNow;
+    if (F.followHead && m && m.n > 40 && m.top >= 0) {
+      const r = app.camRect(), hh = (m.bottom - m.top) * .13, c = app.m2s(m.hx, m.top + hh * .5);
+      want.head = { x: c.x, y: c.y, size: clamp(hh / app.mh * r.h * .62, app.H * .05, app.H * .25) };
+    }
+    // your hands pressing through the wall (smoothed landmarks, fade in/out)
+    this.hl = this.hl || { L: null, R: null }; this.he = this.he || { L: 0, R: 0 };
+    for (const k of ['L', 'R']) {
+      const h = app.hands[k];
+      if (F.hands && h.present && h.lm) {
+        this.hl[k] = this.hl[k] ? this.hl[k].map((p, i) => ({ x: lerp(p.x, h.lm[i].x, .5), y: lerp(p.y, h.lm[i].y, .5) })) : h.lm.map(p => ({ x: p.x, y: p.y }));
+        this.he[k] = Math.min(1, this.he[k] + dt * 2.2);
+      } else this.he[k] = Math.max(0, this.he[k] - dt * 1.6);
+    }
+    for (const key in want) {
+      const w = want[key]; let f = this.faces.find(f => f.anchor === key && f.ph !== 'out');
+      if (!f) { this.spawn(w.x, w.y, true); f = this.faces[this.faces.length - 1]; f.anchor = key; f.dur = .9; f.size = w.size; f.tilt = 0; }
+      f.seenAt = app.t; f.x = lerp(f.x, w.x, .35); f.y = lerp(f.y, w.y, .35); f.size = lerp(f.size, w.size, .1);
+    }
+    for (const f of this.faces) if (f.anchor && f.ph !== 'out' && app.t - f.seenAt > .5) { f.ph = 'out'; f.t = 0; f.outDur = 1; f.e0 = f.e; }
+    // who they stare at
+    let lx = null, ly = null;
+    if (R) { lx = R.x; ly = R.y; } else if (app.maskNow && app.maskNow.n > 30) { const c = app.m2s(app.maskNow.hx, app.maskNow.top + 5); lx = c.x; ly = c.y; }
+    for (let i = this.faces.length - 1; i >= 0; i--) {
+      const f = this.faces[i]; f.t += dt;
+      f.tx = lerp(f.tx, f.x, 1 - Math.pow(.15, dt)); f.ty = lerp(f.ty, f.y, 1 - Math.pow(.15, dt));
+      if (f.ph === 'in') { f.e = easeIO(clamp(f.t / f.dur, 0, 1)); if (f.t >= f.dur) { f.ph = 'hold'; f.t = 0; } }
+      else if (f.ph === 'hold') { f.e = 1 + Math.sin(app.t * 1.1 + f.seed) * .03; if (f.t >= f.hold && !f.anchor) { f.ph = 'out'; f.t = 0; f.outDur = 2.6; f.e0 = f.e; } }
+      else { f.e = f.e0 * (1 - easeIO(clamp(f.t / f.outDur, 0, 1))); if (f.t >= f.outDur) { this.faces.splice(i, 1); if (this.grab && this.grab.f === f) this.grab = null; continue; } }
+      let m = .08 + .3 * Math.pow(.5 + .5 * Math.sin(app.t * .6 + f.seed), 3) + app.bass * .4 * SETTINGS.audioPulse + app.level * .5 * F.audio;
+      let g = .25 + .15 * Math.sin(app.t * 2 + f.seed) + app.bass * .8 * F.audio;
+      if (Math.random() < dt * .25) f.twitch = .25; f.twitch = Math.max(0, f.twitch - dt);
+      if (f.scream > 0) { f.scream -= dt; m = 1; g = 1; if (f.ph !== 'out') f.e = Math.min(1.15, f.e + dt * 2); if (f.scream <= 0 && f.ph !== 'out') { f.ph = 'out'; f.t = 0; f.outDur = 1.2; f.e0 = f.e; } }
+      // beat: punch out on every kick, sink back into the wall over the beat (follows the song's tempo)
+      if (f.stag === undefined) { f.stag = rand(0, .04); f.bk = rand(.85, 1.1); }
+      const P = app.beatPeriod || .5, since = (app.sinceBeat ?? 99) - f.stag;
+      let beat = 0;
+      if (app.sinceBeat < P * 2) { const u = ((since / P) % 1 + 1) % 1; beat = u < .07 ? u / .07 : Math.pow(Math.max(0, 1 - (u - .07) / F.beatSink), 2); }
+      beat = Math.max(beat, Math.pow(app.bassEnv || 0, 1.3) * .95);   // and breathe with the bass even between detected beats
+      f.de = app.audio && F.beat && f.scream <= 0
+        ? f.e * clamp(F.beatRest + (F.beatPunch - F.beatRest) * beat * f.bk + app.level * .2, 0, 1.3)
+        : f.e;
+      if (app.audio && F.beat) { m += beat * .6 * F.audio; g += beat * F.audio; }   // eyes flare + mouth jolts on the beat
+      f.mouth = lerp(f.mouth, m, 1 - Math.pow(.02, dt)); f.glow = lerp(f.glow, g, .1);
+      let ax = 0, ay = 0; if (lx !== null && !f.anchor) { const dx = lx - f.x, dy = ly - f.y, d = Math.hypot(dx, dy) + 1; ax = dx / d; ay = dy / d; }
+      f.look.x = lerp(f.look.x, ax, .06); f.look.y = lerp(f.look.y, ay, .06);
+    }
+  }
+  drawHand(h, P, e) {
+    const s = SETTINGS.faces.res, R = v => `rgb(${clamp(v * e, 0, 255) | 0},0,0)`, Q = i => [P[i].x * s, P[i].y * s];
+    const hs = Math.hypot(P[0].x - P[9].x, P[0].y - P[9].y) * s; if (hs < 2) return;
+    h.save();
+    h.filter = `blur(${hs * .55}px)`; ell(h, P[9].x * s, P[9].y * s, hs * 1.3, hs * 1.6, R(40));          // the wall stretching around it
+    h.filter = `blur(${Math.max(1, hs * .08)}px)`;
+    h.fillStyle = R(90); h.beginPath(); [0, 1, 5, 9, 13, 17].forEach((i, n) => { const [x, y] = Q(i); n ? h.lineTo(x, y) : h.moveTo(x, y); }); h.closePath(); h.fill();
+    h.strokeStyle = R(110); h.lineCap = h.lineJoin = 'round';
+    for (const ch of [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16], [17, 18, 19, 20]]) {
+      h.lineWidth = hs * (ch[0] === 1 ? .27 : ch[0] === 17 ? .19 : .23);
+      h.beginPath(); ch.forEach((i, n) => { const [x, y] = Q(i); n ? h.lineTo(x, y) : h.moveTo(x, y); }); h.stroke();
+    }
+    h.restore();
+  }
+  drawFace(h, f) {
+    const s = SETTINGS.faces.res, e = f.de ?? f.e; if (e < .01) return;
+    const sh = (f.scream > 0 ? 4 : 0) + (f.twitch > 0 ? 2 : 0) + this.app.bass * 3 * SETTINGS.faces.audio;
+    const x = f.x * s + rand(-sh, sh) * s, y = f.y * s + rand(-sh, sh) * s, r = f.size * s;
+    const R = v => `rgb(${clamp(v * e, 0, 255) | 0},0,0)`, G = v => `rgb(0,${clamp(v * Math.min(1, e), 0, 255) | 0},0)`;
+    // drag trail: the membrane stretching behind a dragged face
+    const dx = (f.tx - f.x) * s, dy = (f.ty - f.y) * s, dl = Math.hypot(dx, dy);
+    if (dl > 2) { h.save(); h.filter = `blur(${r * .35}px)`; h.translate(x + dx / 2, y + dy / 2); h.rotate(Math.atan2(dy, dx)); ell(h, 0, 0, dl / 2 + r * .5, r * .55, R(45)); h.restore(); }
+    h.save(); h.translate(x, y); h.rotate(f.tilt);
+    h.filter = `blur(${Math.max(1, r * .1 * (1.8 - Math.min(1, e)))}px)`;
+    ell(h, 0, r * .1, r * 1.25, r * 1.5, R(45));                      // membrane bulge
+    ell(h, 0, 0, r * .72 * f.wid, r * f.len, R(105));                  // skull
+    ell(h, 0, -r * .3, r * .56, r * .14, R(40));                       // brow
+    ell(h, -r * .34, r * .12, r * .16, r * .12, R(35)); ell(h, r * .34, r * .12, r * .16, r * .12, R(35)); // cheekbones
+    ell(h, 0, r * .06, r * .09, r * .24, R(55));                       // nose
+    ell(h, 0, r * (.78 + f.mouth * .2), r * .26, r * .16, R(35));      // chin
+    const es = f.eyeS * (1 + f.scream * .15);
+    ell(h, -r * f.eyeSp, -r * .12, r * .15 * es, r * .12 * es, G(230)); // sockets
+    ell(h, r * f.eyeSp, -r * .12, r * .15 * es, r * .12 * es, G(230));
+    ell(h, 0, r * (.46 + f.mouth * .12), r * (.15 + .13 * f.mouth), r * (.035 + .32 * f.mouth), G(255)); // mouth
+    h.filter = `blur(${Math.max(.6, r * .035)}px)`;
+    const gl = `rgb(0,0,${clamp(255 * f.glow * Math.min(1, e), 0, 255) | 0})`;
+    ell(h, -r * f.eyeSp + f.look.x * r * .05, -r * .12 + f.look.y * r * .04, r * .045, r * .045, gl);
+    ell(h, r * f.eyeSp + f.look.x * r * .05, -r * .12 + f.look.y * r * .04, r * .045, r * .045, gl);
+    h.restore();
+  }
+  draw(ctx) {
+    const F = SETTINGS.faces, app = this.app, W = app.W, H = app.H, h = this.hx, w = this.fw, hh = this.fh;
+    h.globalCompositeOperation = 'source-over'; h.filter = 'none'; h.fillStyle = '#000'; h.fillRect(0, 0, w, hh);
+    h.globalCompositeOperation = 'lighter';
+    for (const f of this.faces) this.drawFace(h, f);
+    for (const k of ['L', 'R']) if (this.he && this.he[k] > .01 && this.hl[k]) this.drawHand(h, this.hl[k], easeIO(this.he[k]));
+    h.globalCompositeOperation = 'source-over'; h.filter = 'none';
+    const d = h.getImageData(0, 0, w, hh).data, o = this.out.data, T = this.tex;
+    const wc = hexRGB(F.wall), gc = hexRGB(F.glow), depth = F.depth * .012, flick = 1 + app.bass * .15 * SETTINGS.audioPulse;
+    for (let y = 0; y < hh; y++) {
+      const y2 = Math.min(y + 2, hh - 1);
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x, j = i * 4, j2 = (y2 * w + Math.min(x + 2, w - 1)) * 4;
+        const h0 = d[j] - d[j + 1] * .9, h1 = d[j2] - d[j2 + 1] * .9;
+        const shd = (h0 - h1) * depth, cav = d[j + 1] / 255, g = d[j + 2] / 255;
+        let b = (T[i] * (1 + shd) + shd * .35) * (1 - cav * .93) * flick;
+        o[j] = wc[0] * b + gc[0] * g; o[j + 1] = wc[1] * b + gc[1] * g; o[j + 2] = wc[2] * b + gc[2] * g * .4; o[j + 3] = 255;
+      }
+    }
+    this.ox.putImageData(this.out, 0, 0);
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(this.oc, 0, 0, W, H);
+    const vg = ctx.createRadialGradient(W / 2, H / 2, H * .25, W / 2, H / 2, Math.hypot(W, H) * .6);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.85)'); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  }
+}
+
+/* =====================================================================
+   SCENE: PUMPKIN — carve the stencil with your finger, light it, get a score
+   ===================================================================== */
+const SPOOKY = {   // each draws white in a box from -u to +u; cut-outs use destination-out
+  skull(x, u) {
+    ell(x, 0, -.15 * u, .62 * u, .6 * u, '#fff'); x.fillStyle = '#fff'; x.beginPath(); x.roundRect(-.36 * u, .2 * u, .72 * u, .42 * u, .1 * u); x.fill();
+    x.globalCompositeOperation = 'destination-out';
+    ell(x, -.25 * u, -.1 * u, .17 * u, .19 * u, '#000'); ell(x, .25 * u, -.1 * u, .17 * u, .19 * u, '#000');
+    x.beginPath(); x.moveTo(0, .1 * u); x.lineTo(-.08 * u, .28 * u); x.lineTo(.08 * u, .28 * u); x.fill();
+    x.lineWidth = .04 * u; x.beginPath(); x.moveTo(-.36 * u, .44 * u); x.lineTo(.36 * u, .44 * u); for (let t = -.24; t <= .25; t += .12) { x.moveTo(t * u, .36 * u); x.lineTo(t * u, .62 * u); } x.stroke();
+  },
+  bat(x, u) {
+    const w = [[.08, -.12], [.3, -.34], [.55, -.36], [.8, -.28], [.98, -.05], [.83, .0], [.73, .13], [.59, .05], [.46, .21], [.33, .08], [.17, .23], [.07, .1]];
+    x.fillStyle = '#fff'; x.beginPath(); w.forEach(([a, b], i) => i ? x.lineTo(a * u, b * u) : x.moveTo(a * u, b * u)); [...w].reverse().forEach(([a, b]) => x.lineTo(-a * u, b * u)); x.fill();
+    ell(x, 0, .02 * u, .12 * u, .26 * u, '#fff'); ell(x, 0, -.22 * u, .11 * u, .1 * u, '#fff');
+    x.beginPath(); x.moveTo(-.1 * u, -.25 * u); x.lineTo(-.08 * u, -.42 * u); x.lineTo(-.02 * u, -.28 * u); x.moveTo(.1 * u, -.25 * u); x.lineTo(.08 * u, -.42 * u); x.lineTo(.02 * u, -.28 * u); x.fill();
+    x.globalCompositeOperation = 'destination-out'; ell(x, -.045 * u, -.23 * u, .025 * u, .02 * u, '#000'); ell(x, .045 * u, -.23 * u, .025 * u, .02 * u, '#000');
+  },
+  web(x, u) {
+    const n = 10, ang = i => i / n * Math.PI * 2 + .2;
+    x.strokeStyle = '#fff'; x.lineWidth = .028 * u; x.lineCap = 'round'; x.beginPath();
+    for (let i = 0; i < n; i++) { x.moveTo(0, 0); x.lineTo(Math.cos(ang(i)) * .97 * u, Math.sin(ang(i)) * .97 * u); }
+    for (let r = .16; r < .95; r += .13) for (let i = 0; i < n; i++) {
+      const a0 = ang(i), a1 = ang(i + 1), am = (a0 + a1) / 2, rr = r * u;
+      x.moveTo(Math.cos(a0) * rr, Math.sin(a0) * rr); x.quadraticCurveTo(Math.cos(am) * rr * .82, Math.sin(am) * rr * .82, Math.cos(a1) * rr, Math.sin(a1) * rr);
+    }
+    x.stroke();
+  },
+  ghost(x, u) {
+    x.fillStyle = '#fff'; x.beginPath(); x.moveTo(-.52 * u, .72 * u); x.lineTo(-.52 * u, -.1 * u); x.arc(0, -.1 * u, .52 * u, Math.PI, 0); x.lineTo(.52 * u, .72 * u);
+    for (let i = 0; i < 4; i++) { const x0 = (.52 - i * .26) * u; x.quadraticCurveTo(x0 - .065 * u, (i % 2 ? .82 : .55) * u, x0 - .13 * u, .68 * u); x.quadraticCurveTo(x0 - .195 * u, (i % 2 ? .55 : .82) * u, x0 - .26 * u, .72 * u); }
+    x.fill(); x.globalCompositeOperation = 'destination-out';
+    ell(x, -.18 * u, -.15 * u, .09 * u, .14 * u, '#000'); ell(x, .18 * u, -.15 * u, .09 * u, .14 * u, '#000'); ell(x, 0, .15 * u, .11 * u, .17 * u, '#000');
+  },
+  eye(x, u) {
+    x.strokeStyle = x.fillStyle = '#fff'; x.lineWidth = .06 * u; x.lineCap = 'round';
+    x.beginPath(); x.moveTo(-.95 * u, 0); x.quadraticCurveTo(0, -.8 * u, .95 * u, 0); x.quadraticCurveTo(0, .8 * u, -.95 * u, 0); x.stroke();
+    x.beginPath(); x.arc(0, 0, .33 * u, 0, 6.283); x.stroke(); x.beginPath(); x.arc(0, 0, .17 * u, 0, 6.283); x.fill();
+    x.beginPath(); for (let i = -3; i <= 3; i++) { const t = i / 4, px = t * .8 * u, py = -(1 - t * t) * .4 * u; x.moveTo(px, py); x.lineTo(px * 1.15, py - .2 * u); } x.stroke();
+  },
+  spider(x, u) {
+    x.strokeStyle = x.fillStyle = '#fff'; x.lineWidth = .055 * u; x.lineCap = x.lineJoin = 'round'; x.beginPath();
+    for (const sd of [-1, 1]) for (let i = 0; i < 4; i++) { const by = -.12 + i * .1; x.moveTo(sd * .12 * u, by * u); x.lineTo(sd * (.5 + i * .04) * u, (-.55 + i * .28) * u); x.lineTo(sd * (.88 - i * .05) * u, (-.25 + i * .38) * u); }
+    x.stroke(); ell(x, 0, .25 * u, .26 * u, .32 * u, '#fff'); ell(x, 0, -.15 * u, .17 * u, .16 * u, '#fff');
+    x.beginPath(); x.moveTo(0, -.4 * u); x.lineTo(0, -.97 * u); x.lineWidth = .02 * u; x.stroke();
+    x.globalCompositeOperation = 'destination-out'; x.beginPath(); x.moveTo(-.08 * u, .14 * u); x.lineTo(.08 * u, .14 * u); x.lineTo(-.08 * u, .38 * u); x.lineTo(.08 * u, .38 * u); x.fill();
+  },
+  pentagram(x, u) {
+    x.strokeStyle = '#fff'; x.lineWidth = .05 * u; x.lineJoin = 'round';
+    x.beginPath(); x.arc(0, 0, .93 * u, 0, 6.283); x.stroke(); x.beginPath(); x.arc(0, 0, .8 * u, 0, 6.283); x.stroke();
+    x.beginPath(); for (let i = 0; i <= 5; i++) { const a = -Math.PI / 2 + i * 4 * Math.PI / 5; i ? x.lineTo(Math.cos(a) * .8 * u, Math.sin(a) * .8 * u) : x.moveTo(Math.cos(a) * .8 * u, Math.sin(a) * .8 * u); } x.stroke();
+  },
+  moon(x, u) {
+    ell(x, -.1 * u, 0, .8 * u, .8 * u, '#fff'); x.globalCompositeOperation = 'destination-out'; ell(x, .22 * u, -.15 * u, .72 * u, .72 * u, '#000');
+    x.globalCompositeOperation = 'source-over'; x.fillStyle = '#fff';
+    for (const [a, b, s] of [[.55, -.55, .1], [.75, .05, .07], [.4, .45, .06]]) { x.beginPath(); for (let i = 0; i < 10; i++) { const r = i % 2 ? s * .4 : s, an = i * Math.PI / 5 - Math.PI / 2; x.lineTo((a + Math.cos(an) * r) * u, (b + Math.sin(an) * r) * u); } x.fill(); }
+  },
+  hand(x, u) {
+    x.strokeStyle = x.fillStyle = '#fff'; x.lineCap = 'round';
+    ell(x, 0, .25 * u, .4 * u, .42 * u, '#fff'); x.lineWidth = .17 * u; x.beginPath();
+    for (const [a, b, c, d] of [[-.22, 0, -.32, -.72], [-.05, -.05, -.06, -.86], [.12, -.03, .19, -.78], [.28, .05, .43, -.52], [-.33, .3, -.72, .0]]) { x.moveTo(a * u, b * u); x.lineTo(c * u, d * u); } x.stroke();
+    x.lineWidth = .05 * u; x.beginPath(); for (const [a, l] of [[-.25, .3], [-.08, .2], [.1, .35], [.27, .18]]) { x.moveTo(a * u, .55 * u); x.lineTo(a * u, (.55 + l) * u); } x.stroke();
+    for (const [a, l] of [[-.25, .3], [-.08, .2], [.1, .35], [.27, .18]]) ell(x, a * u, (.57 + l) * u, .045 * u, .055 * u, '#fff');
+  },
+  coffin(x, u) {
+    x.fillStyle = '#fff'; x.beginPath(); [[-.22, -.95], [.22, -.95], [.48, -.42], [.3, .95], [-.3, .95], [-.48, -.42]].forEach(([a, b], i) => i ? x.lineTo(a * u, b * u) : x.moveTo(a * u, b * u)); x.fill();
+    x.globalCompositeOperation = 'destination-out'; x.fillRect(-.05 * u, -.6 * u, .1 * u, .75 * u); x.fillRect(-.24 * u, -.4 * u, .48 * u, .1 * u);
+  },
+  grave(x, u) {
+    x.fillStyle = '#fff'; x.beginPath(); x.moveTo(-.55 * u, .8 * u); x.lineTo(-.55 * u, -.3 * u); x.arc(0, -.3 * u, .55 * u, Math.PI, 0); x.lineTo(.55 * u, .8 * u); x.fill();
+    x.fillRect(-.9 * u, .8 * u, 1.8 * u, .1 * u);
+    x.globalCompositeOperation = 'destination-out'; x.font = `${.42 * u}px Creepster, Impact, "Arial Black", sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('RIP', 0, -.12 * u);
+    x.lineWidth = .04 * u; x.beginPath(); x.moveTo(-.3 * u, .25 * u); x.lineTo(.3 * u, .25 * u); x.moveTo(-.22 * u, .42 * u); x.lineTo(.22 * u, .42 * u); x.stroke();
+  },
+  pumpkin(x, u) {
+    ell(x, -.3 * u, .08 * u, .45 * u, .55 * u, '#fff'); ell(x, .3 * u, .08 * u, .45 * u, .55 * u, '#fff'); ell(x, 0, .08 * u, .55 * u, .6 * u, '#fff');
+    x.fillStyle = '#fff'; x.fillRect(-.06 * u, -.72 * u, .12 * u, .25 * u);
+    x.globalCompositeOperation = 'destination-out'; x.fillStyle = '#000';
+    const tri = (p) => { x.beginPath(); p.forEach(([a, b], i) => i ? x.lineTo(a * u, b * u) : x.moveTo(a * u, b * u)); x.fill(); };
+    tri([[-.42, -.02], [-.12, -.02], [-.27, -.3]]); tri([[.42, -.02], [.12, -.02], [.27, -.3]]); tri([[-.07, .15], [.07, .15], [0, .04]]);
+    tri([[-.5, .25], [-.36, .33], [-.24, .26], [-.12, .36], [0, .28], [.12, .36], [.24, .26], [.36, .33], [.5, .25], [.36, .5], [0, .58], [-.36, .5]]);
+  },
+  cat(x, u) {
+    ell(x, 0, .35 * u, .38 * u, .5 * u, '#fff'); ell(x, 0, -.3 * u, .28 * u, .25 * u, '#fff');
+    x.fillStyle = '#fff'; x.beginPath(); x.moveTo(-.26 * u, -.38 * u); x.lineTo(-.22 * u, -.68 * u); x.lineTo(-.06 * u, -.48 * u); x.moveTo(.26 * u, -.38 * u); x.lineTo(.22 * u, -.68 * u); x.lineTo(.06 * u, -.48 * u); x.fill();
+    x.strokeStyle = '#fff'; x.lineWidth = .09 * u; x.lineCap = 'round'; x.beginPath(); x.moveTo(.3 * u, .75 * u); x.bezierCurveTo(.85 * u, .8 * u, .85 * u, .1 * u, .6 * u, -.15 * u); x.stroke();
+    x.globalCompositeOperation = 'destination-out'; ell(x, -.11 * u, -.32 * u, .06 * u, .08 * u, '#000'); ell(x, .11 * u, -.32 * u, .06 * u, .08 * u, '#000');
+  },
+};
+
+const STENCILS = (() => {
+  const circ = (cx, cy, rx, ry, n = 26) => Array.from({ length: n }, (_, i) => [cx + Math.cos(i / n * 6.283) * rx, cy + Math.sin(i / n * 6.283) * ry]);
+  const mx = pts => pts.map(([x, y]) => [-x, y]);
+  const eye1 = [[-0.55, -0.08], [-0.18, -0.08], [-0.36, -0.42]];
+  const eye2 = [[-0.62, -0.32], [-0.16, -0.14], [-0.24, 0.0], [-0.56, -0.06]];
+  return [   // points in pumpkin space: x,y from -1 to 1 across the pumpkin
+    { name: 'CLASSIC', shapes: [eye1, mx(eye1), [[-0.09, 0.14], [0.09, 0.14], [0, -0.01]],
+      [[-0.62, 0.22], [-0.47, 0.31], [-0.33, 0.25], [-0.25, 0.37], [-0.12, 0.31], [0, 0.41], [0.12, 0.31], [0.25, 0.37], [0.33, 0.25], [0.47, 0.31], [0.62, 0.22], [0.5, 0.47], [0.26, 0.6], [0, 0.64], [-0.26, 0.6], [-0.5, 0.47]]] },
+    { name: 'FANGS', shapes: [eye2, mx(eye2), [[0, -0.02], [0.08, 0.1], [0, 0.17], [-0.08, 0.1]],
+      [[-0.66, 0.18], [-0.46, 0.27], [-0.39, 0.4], [-0.31, 0.29], [0.31, 0.29], [0.39, 0.4], [0.46, 0.27], [0.66, 0.18], [0.47, 0.5], [0, 0.62], [-0.47, 0.5]]] },
+    { name: 'SHOCKED', shapes: [circ(-0.34, -0.2, 0.16, 0.19), circ(0.34, -0.2, 0.16, 0.19), circ(0, 0.38, 0.17, 0.22)] },
+    { name: 'FREE CARVE', shapes: [] },
+  ];
+})();
+const mixRGB = (a, b, t) => `rgb(${a.map((v, i) => Math.round(lerp(v, b[i], t))).join(',')})`;
+
+class Pumpkin {
+  constructor(app) { this.app = app; this.st = 0; this.chips = []; this.last = null; this.twoDone = false; this.lightHold = 0; this.knife = null; }
+  resize() { this.build(); }
+  enter() {}
+  clear() { if (this.done) this.st = (this.st + 1) % STENCILS.length; this.build(); }
+  build() {
+    const P = SETTINGS.pumpkin, ry = this.app.H * P.size, rx = ry * 1.2, pad = ry * .5;
+    this.rx = rx; this.ry = ry; this.cw = Math.ceil(rx * 2 + pad * 2); this.ch = Math.ceil(ry * 2 + pad * 2);
+    this.ox = this.cw / 2; this.oy = this.ch / 2 + pad * .15;          // pumpkin centre inside its own canvas
+    this.pc = this.drawPumpkin();
+    this.cc = mkCanvas(this.cw, this.ch); this.ccx = this.cc.getContext('2d');   // what you've carved (white)
+    this.fc = mkCanvas(this.cw, this.ch); this.fx = this.fc.getContext('2d');
+    this.gc = mkCanvas(this.cw, this.ch); this.gx = this.gc.getContext('2d');
+    this.score = { cov: 0, slip: 0 }; this.done = false; this.lit = 0; this.result = null; this.chips = [];
+    this.makeStencil();
+  }
+  pos() { return { x: this.app.W / 2 - this.ox, y: this.app.H * .5 - this.oy }; }
+  drawPumpkin() {
+    const c = mkCanvas(this.cw, this.ch), x = c.getContext('2d'), rx = this.rx, ry = this.ry, X = this.ox, Y = this.oy;
+    x.save(); x.translate(X + rx * .04, Y - ry * .88);
+    const sg = x.createLinearGradient(-ry * .1, 0, ry * .12, 0); sg.addColorStop(0, '#2f3a14'); sg.addColorStop(.5, '#6b7a2a'); sg.addColorStop(1, '#27300f');
+    x.fillStyle = sg; x.beginPath(); x.moveTo(-ry * .09, ry * .12); x.quadraticCurveTo(-ry * .1, -ry * .2, ry * .02, -ry * .3); x.lineTo(ry * .13, -ry * .24); x.quadraticCurveTo(ry * .04, -ry * .12, ry * .09, ry * .12); x.closePath(); x.fill(); x.restore();
+    for (const o of [-.62, .62, -.42, .42, -.21, .21, 0]) {
+      const cx = X + o * rx, w = rx * (.46 - Math.abs(o) * .08), h = ry * (1 - Math.abs(o) * .1);
+      const g = x.createRadialGradient(cx - w * .3, Y - h * .35, h * .05, cx, Y, h * 1.05);
+      g.addColorStop(0, '#ffb347'); g.addColorStop(.55, '#f07c12'); g.addColorStop(1, '#8a3a04');
+      x.fillStyle = g; x.beginPath(); x.ellipse(cx, Y, w, h, 0, 0, 6.3); x.fill();
+      x.strokeStyle = 'rgba(90,30,0,.45)'; x.lineWidth = Math.max(2, ry * .012); x.stroke();
+    }
+    x.globalCompositeOperation = 'source-atop';
+    const sh = x.createLinearGradient(0, Y - ry, 0, Y + ry); sh.addColorStop(0, 'rgba(255,220,150,.12)'); sh.addColorStop(.6, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(40,10,0,.55)');
+    x.fillStyle = sh; x.fillRect(0, 0, c.width, c.height);
+    return c;
+  }
+  shapePath(ctx, sh, sc = 1) {
+    ctx.beginPath();
+    sh.forEach(([u, v], i) => { const px = (this.ox + u * this.rx * .9) * sc, py = (this.oy + v * this.ry * .9) * sc; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+    ctx.closePath();
+  }
+  makeStencil() {
+    const S = STENCILS[this.st], n = 128, sc = n / this.cw, ny = Math.ceil(this.ch * sc);
+    this.sn = n; this.sny = ny;
+    const core = mkCanvas(n, ny).getContext('2d'), tol = mkCanvas(n, ny).getContext('2d');
+    core.fillStyle = '#fff'; tol.fillStyle = tol.strokeStyle = '#fff'; tol.lineWidth = n * .035; tol.lineJoin = 'round';
+    for (const sh of S.shapes) { this.shapePath(core, sh, sc); core.fill(); this.shapePath(tol, sh, sc); tol.fill(); tol.stroke(); }
+    this.core = core.getImageData(0, 0, n, ny).data; this.tol = tol.getImageData(0, 0, n, ny).data;
+    let c = 0; for (let i = 3; i < this.core.length; i += 4) if (this.core[i] > 127) c++;
+    this.coreN = c;
+    this.small = mkCanvas(n, ny); this.smx = this.small.getContext('2d', { willReadFrequently: true });
+  }
+  measure() {
+    if (!this.coreN) return;
+    const s = this.smx; s.clearRect(0, 0, this.sn, this.sny); s.drawImage(this.cc, 0, 0, this.sn, this.sny);
+    const d = s.getImageData(0, 0, this.sn, this.sny).data; let hit = 0, slip = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 100) { if (this.core[i] > 127) hit++; else if (this.tol[i] < 100) slip++; }
+    this.score = { cov: hit / this.coreN, slip: slip / this.coreN };
+  }
+  finish() {
+    this.measure(); this.done = true;
+    const sc = this.coreN ? Math.round(100 * clamp(this.score.cov, 0, 1) * (1 - clamp(this.score.slip * 1.5, 0, 1))) : null;
+    const grade = sc === null ? 'LIT!' : sc >= 85 ? 'SPOOKTACULAR' : sc >= 65 ? 'WICKED' : sc >= 40 ? 'CREEPY' : 'MESSY';
+    this.result = { sc, grade }; this.app.fade = Math.max(this.app.fade, .5);
+  }
+  update(dt, R) {
+    const P = SETTINGS.pumpkin, app = this.app, pos = this.pos(), cx = this.ccx;
+    this.knife = R && (R.pose === 'one' || R.pose === 'two') ? { x: R.x, y: R.y, lifted: R.pose === 'two' } : null;
+    if (R && R.pose === 'one' && !this.done) {
+      const lx = R.x - pos.x, ly = R.y - pos.y;
+      if (((lx - this.ox) / this.rx) ** 2 + ((ly - this.oy) / this.ry) ** 2 < .9) {
+        const r = this.ry * P.knife;
+        cx.fillStyle = cx.strokeStyle = '#fff'; cx.lineCap = 'round'; cx.lineWidth = r * 2;
+        if (this.last) { cx.beginPath(); cx.moveTo(this.last.x, this.last.y); cx.lineTo(lx, ly); cx.stroke(); }
+        else { cx.beginPath(); cx.arc(lx, ly, r, 0, 6.3); cx.fill(); }
+        if (this.last && Math.hypot(lx - this.last.x, ly - this.last.y) > 1 && this.chips.length < 300)
+          for (let i = 0; i < 2; i++) this.chips.push({ x: R.x, y: R.y, vx: rand(-160, 160), vy: rand(-260, -60), life: 1, s: rand(3, 7), c: Math.random() < .5 ? '#f08a1c' : '#ffd27a' });
+        this.last = { x: lx, y: ly }; this.dirty = true;
+      } else this.last = null;
+    } else this.last = null;
+    this.mt = (this.mt || 0) + dt;
+    if (this.dirty && this.mt > .25) { this.mt = 0; this.dirty = false; this.measure(); if (!this.done && this.coreN && this.score.cov >= P.finishAt) this.finish(); }
+    if (R && R.pose === 'four' && !this.done) { this.lightHold += dt; if (this.lightHold > .6) this.finish(); } else this.lightHold = 0;
+    if (R && R.pose === 'rock' && R.held > .6 && !this.twoDone) { this.twoDone = true; this.st = (this.st + 1) % STENCILS.length; this.build(); app.toast(STENCILS[this.st].name); }
+    if (!R || R.pose !== 'rock') this.twoDone = false;
+    this.lit = this.done ? Math.min(1, this.lit + dt * 1.2) : 0;
+    for (let i = this.chips.length - 1; i >= 0; i--) { const c = this.chips[i]; c.vy += 900 * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.life -= dt * 1.2; if (c.life <= 0) this.chips.splice(i, 1); }
+  }
+  draw(ctx) {
+    const app = this.app, W = app.W, H = app.H, t = app.t, pos = this.pos(), cx0 = pos.x + this.ox, cy0 = pos.y + this.oy;
+    const fl = .85 + .15 * Math.sin(t * 11) * Math.sin(t * 4.3 + 1) + (app.pulse || 0) * .6;
+    ctx.fillStyle = '#05030a'; ctx.fillRect(0, 0, W, H);
+    if (this.lit > 0) {
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createRadialGradient(cx0, cy0, this.ry * .3, cx0, cy0, this.rx * 2.4);
+      g.addColorStop(0, `rgba(255,140,30,${.35 * this.lit * fl})`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); ctx.restore();
+    }
+    ctx.drawImage(this.pc, pos.x, pos.y);
+    // carved holes: the cut flesh wall, then candlelight inside
+    const fx = this.fx, gx = this.gx, cw = this.cw, ch = this.ch, d = this.ry * .035;
+    fx.globalCompositeOperation = 'copy'; fx.drawImage(this.cc, 0, 0); fx.globalCompositeOperation = 'source-in'; fx.fillStyle = SETTINGS.pumpkin.flesh; fx.fillRect(0, 0, cw, ch);
+    gx.globalCompositeOperation = 'copy'; gx.drawImage(this.cc, d * .6, d); gx.globalCompositeOperation = 'destination-in'; gx.drawImage(this.cc, 0, 0);
+    gx.globalCompositeOperation = 'source-in';
+    const b = clamp((.45 + .55 * this.lit) * fl, 0, 1), dark = [26, 8, 0];
+    const g = gx.createRadialGradient(this.ox, this.oy + this.ry * .25, 0, this.ox, this.oy, this.ry * 1.1);
+    g.addColorStop(0, mixRGB(dark, [255, 246, 190], b)); g.addColorStop(.5, mixRGB(dark, [255, 190, 60], b)); g.addColorStop(1, mixRGB(dark, [200, 90, 10], b));
+    gx.fillStyle = g; gx.fillRect(0, 0, cw, ch);
+    fx.globalCompositeOperation = gx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(this.fc, pos.x, pos.y); ctx.drawImage(this.gc, pos.x, pos.y);
+    if (this.lit > 0) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.filter = 'blur(16px)'; ctx.globalAlpha = .9 * this.lit * fl; ctx.drawImage(this.gc, pos.x, pos.y); ctx.restore(); }
+    // marker-pen stencil
+    if (!this.done) {
+      ctx.save(); ctx.translate(pos.x, pos.y); ctx.setLineDash([8, 7]); ctx.lineDashOffset = -t * 20; ctx.strokeStyle = 'rgba(40,10,0,.75)'; ctx.lineWidth = 3;
+      for (const sh of STENCILS[this.st].shapes) { this.shapePath(ctx, sh); ctx.stroke(); }
+      ctx.restore();
+    }
+    for (const c of this.chips) { ctx.globalAlpha = c.life; ctx.fillStyle = c.c; ctx.fillRect(c.x, c.y, c.s, c.s); }
+    ctx.globalAlpha = 1;
+    // knife
+    if (this.knife && !this.done) {
+      const k = this.knife, L = this.ry * .22; ctx.save(); ctx.translate(k.x, k.y - (k.lifted ? L * .35 : 0)); ctx.rotate(k.lifted ? -.2 : -.5); if (k.lifted) ctx.globalAlpha = .45;
+      ctx.fillStyle = '#d8dde2'; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-L * .13, -L); ctx.lineTo(L * .07, -L); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#3a2412'; ctx.fillRect(-L * .1, -L * 1.5, L * .2, L * .5); ctx.restore();
+    }
+    // score line
+    const S = STENCILS[this.st], ty = Math.min(H - 100, cy0 + this.ry + 50);
+    ctx.textAlign = 'center'; ctx.font = '26px VT323, monospace'; ctx.fillStyle = '#e9e2d0';
+    if (this.done && this.result) {
+      ctx.save(); ctx.globalAlpha = this.lit; ctx.font = `${this.ry * .32}px Creepster, serif`; ctx.fillStyle = '#ffb347'; ctx.shadowColor = '#ff7a00'; ctx.shadowBlur = 30;
+      ctx.fillText(this.result.grade, W / 2, Math.max(this.ry * .35, pos.y + this.oy - this.ry - this.ry * .2)); ctx.restore();
+      ctx.fillText((this.result.sc === null ? '' : `SCORE ${this.result.sc} / 100  ·  `) + '✊ hold new pumpkin · 🤘 hold next design', W / 2, ty);
+    } else if (this.coreN) {
+      ctx.fillText(`${S.name} · carve the dotted lines · ✌ lift knife · ✋ hold to light it`, W / 2, ty);
+      const bw = 280, bx0 = W / 2 - bw / 2, prog = clamp(this.score.cov / SETTINGS.pumpkin.finishAt, 0, 1);
+      ctx.fillStyle = 'rgba(255,255,255,.15)'; ctx.fillRect(bx0, ty + 12, bw, 8); ctx.fillStyle = '#ff9a2a'; ctx.fillRect(bx0, ty + 12, bw * prog, 8);
+      if (this.score.slip > .02) { ctx.fillStyle = '#ff4433'; ctx.fillText(`slips ${Math.round(this.score.slip * 100)}%`, W / 2, ty + 44); }
+    } else ctx.fillText('FREE CARVE · ✋ hold to light it', W / 2, ty);
+  }
+}
+
+/* =====================================================================
+   FX — creatures + weather any scene can call: spiders, eyeballs, blood rain, lightning
+   ===================================================================== */
+class FX {
+  constructor(app) { this.app = app; this.clear(); this.sp = {}; }
+  clear() { this.spiders = []; this.eyes = []; this.rain = []; this.splats = []; this.bolts = []; this.rainT = 0; this.flash = 0; }
+  bloodRain(sec) { this.rainT = Math.max(this.rainT, sec); this.app.toast('BLOOD RAIN'); }
+  spider(x, y, vx, vy, up) {
+    if (this.spiders.length > 140) return; const sc = this.app.H / 720;
+    this.spiders.push({ x, y, vx, vy, a: up ? -Math.PI / 2 + rand(-.6, .6) : Math.atan2(vy, vx), fall: up ? 0 : .45, r: rand(7, 14) * sc, sp: rand(130, 280) * sc, ph: rand(0, 6), turn: 0, stop: 0, life: 14, in: false });
+  }
+  eyeball(x, y, vx, vy) {
+    if (this.eyes.length > 70) return; const sc = this.app.H / 720;
+    this.eyes.push({ x, y, vx, vy, r: rand(13, 26) * sc, roll: 0, life: 8, look: { x: 0, y: 0 }, col: ['#4f9d3a', '#3a72c0', '#8a5a2b', '#b01818', '#9a9a2a'][(Math.random() * 5) | 0],
+      veins: Array.from({ length: 7 }, () => ({ a: rand(0, 6.3), l: rand(.35, .75), b: rand(-.5, .5) })) });
+  }
+  lightning(tx, ty) {
+    const H = this.app.H, mk = (x0, y0, x1, y1, n, j) => { const p = [[x0, y0]]; for (let i = 1; i < n; i++) { const t = i / n; p.push([lerp(x0, x1, t) + rand(-j, j), lerp(y0, y1, t) + rand(-j * .3, j * .3)]); } p.push([x1, y1]); return p; };
+    const main = mk(tx + rand(-250, 250), -10, tx, ty, 16, H * .05), bolts = [main];
+    for (let b = 0; b < 3; b++) { const s0 = main[4 + ((Math.random() * 8) | 0)]; bolts.push(mk(s0[0], s0[1], s0[0] + rand(-200, 200), s0[1] + rand(80, 260), 7, H * .03)); }
+    this.bolts.push({ bolts, life: .4 }); this.flash = .7;
+  }
+  spew(key, x, y, dt) {   // continuous pour from a mouth; picks spiders or eyeballs each time it starts
+    const s = this.sp[key] || (this.sp[key] = { t: -9, kind: 'spider', acc: 0 }), app = this.app;
+    if (app.t - s.t > .5) { s.kind = Math.random() < .5 ? 'spider' : 'eye'; app.toast(s.kind === 'spider' ? 'SPIDERS' : 'EYEBALLS'); }
+    s.t = app.t; s.acc += dt * (s.kind === 'spider' ? 9 : 4);
+    while (s.acc >= 1) { s.acc--; s.kind === 'spider' ? this.spider(x, y, rand(-260, 260), rand(-160, 120)) : this.eyeball(x, y, rand(-350, 350), rand(-520, -150)); }
+  }
+  update(dt) {
+    const app = this.app, W = app.W, H = app.H;
+    if (this.rainT > 0) {
+      this.rainT -= dt; let n = 280 * dt; while (n-- > Math.random()) this.rain.push({ x: rand(0, W), y: rand(-80, -10), v: rand(900, 1500), len: rand(20, 55), ty: rand(.4, 1) * H });
+    }
+    for (let i = this.rain.length - 1; i >= 0; i--) { const d = this.rain[i]; d.y += d.v * dt; if (d.y >= d.ty) { if (this.splats.length < 600) this.splats.push({ x: d.x, y: d.ty, r: rand(3, 10), life: 1, d: 0, dm: rand(8, 50) }); this.rain.splice(i, 1); } }
+    for (let i = this.splats.length - 1; i >= 0; i--) { const p = this.splats[i]; p.life -= dt / 6; p.d = Math.min(p.dm, p.d + dt * 25); if (p.life <= 0) this.splats.splice(i, 1); }
+    for (let i = this.spiders.length - 1; i >= 0; i--) {
+      const s = this.spiders[i];
+      if (s.fall > 0) { s.fall -= dt; s.vy += 1100 * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.a = Math.atan2(s.vy, s.vx); s.ph += dt * 30; }
+      else if (s.stop > 0) s.stop -= dt;
+      else {
+        s.turn = s.turn * .9 + rand(-1, 1) * dt * 7; s.a += s.turn * dt * 3;
+        s.x += Math.cos(s.a) * s.sp * dt; s.y += Math.sin(s.a) * s.sp * dt; s.ph += s.sp * dt * .12;
+        if (Math.random() < dt * .4) s.stop = rand(.15, .7);
+      }
+      const inside = s.x > -30 && s.x < W + 30 && s.y > -30 && s.y < H + 30; if (inside) s.in = true;
+      s.life -= dt; if ((s.in && !inside) || s.life <= 0) this.spiders.splice(i, 1);
+    }
+    const head = app.headInfo();
+    for (let i = this.eyes.length - 1; i >= 0; i--) {
+      const e = this.eyes[i]; e.vy += 1400 * dt; e.x += e.vx * dt; e.y += e.vy * dt;
+      if (e.y > H - e.r) { e.y = H - e.r; e.vy = Math.abs(e.vy) > 60 ? -Math.abs(e.vy) * .5 : 0; e.vx *= Math.pow(.25, dt); }
+      if (e.x < e.r) { e.x = e.r; e.vx = Math.abs(e.vx) * .6; } if (e.x > W - e.r) { e.x = W - e.r; e.vx = -Math.abs(e.vx) * .6; }
+      e.roll += e.vx * dt / e.r;
+      let lx, ly; if (Math.abs(e.vx) > 40 || Math.abs(e.vy) > 40) { lx = Math.sin(e.roll); ly = Math.cos(e.roll) * .5; }
+      else if (head) { const dx = head.x - e.x, dy = head.y - e.y, d = Math.hypot(dx, dy) + 1; lx = dx / d; ly = dy / d; } else { lx = 0; ly = 0; }
+      e.look.x = lerp(e.look.x, lx, .2); e.look.y = lerp(e.look.y, ly, .2);
+      e.life -= dt; if (e.life <= 0) this.eyes.splice(i, 1);
+    }
+    for (let i = this.bolts.length - 1; i >= 0; i--) { this.bolts[i].life -= dt; if (this.bolts[i].life <= 0) this.bolts.splice(i, 1); }
+    this.flash = Math.max(0, this.flash - dt * 2.5);
+  }
+  draw(ctx) {
+    const app = this.app, W = app.W, H = app.H;
+    if (this.splats.length) {
+      ctx.fillStyle = '#7a000b'; ctx.strokeStyle = '#7a000b'; ctx.lineCap = 'round';
+      for (const p of this.splats) { ctx.globalAlpha = Math.min(1, p.life * 2); ell(ctx, p.x, p.y, p.r * 1.4, p.r * .55, ctx.fillStyle); ctx.lineWidth = p.r * .35; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y + p.d); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+    }
+    if (this.rain.length) { ctx.strokeStyle = '#b0000f'; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.beginPath(); for (const d of this.rain) { ctx.moveTo(d.x, d.y - d.len); ctx.lineTo(d.x, d.y); } ctx.stroke(); }
+    for (const e of this.eyes) this.drawEye(ctx, e);
+    for (const s of this.spiders) this.drawSpider(ctx, s);
+    if (this.bolts.length || this.flash > 0) {
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (const b of this.bolts) for (const [w, a, blur] of [[10, .35, 18], [3, 1, 0]]) {
+        ctx.globalAlpha = a * b.life / .4; ctx.strokeStyle = '#dfe9ff'; ctx.lineWidth = w; ctx.filter = blur ? `blur(${blur}px)` : 'none';
+        ctx.beginPath(); for (const pts of b.bolts) pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke();
+      }
+      ctx.filter = 'none'; ctx.globalAlpha = 1;
+      if (this.flash > 0) { ctx.fillStyle = `rgba(200,215,255,${this.flash * .35})`; ctx.fillRect(0, 0, W, H); }
+      ctx.restore();
+    }
+  }
+  drawSpider(c, s) {
+    const r = s.r; c.save(); c.translate(s.x, s.y); c.rotate(s.a);
+    c.strokeStyle = '#cfc6b8'; c.lineWidth = Math.max(1, r * .16); c.lineCap = 'round';
+    c.beginPath();
+    for (const side of [-1, 1]) for (let i = 0; i < 4; i++) {
+      const ang = side * (.55 + i * .55) + Math.sin(s.ph + i * 1.6 + (side > 0 ? 0 : Math.PI)) * .28;
+      const hx = r * (.35 - i * .22), kx = hx + Math.cos(ang) * r * 1.25, ky = Math.sin(ang) * r * 1.25, fa = ang + side * .55;
+      c.moveTo(hx, 0); c.lineTo(kx, ky); c.lineTo(kx + Math.cos(fa) * r * 1.1, ky + Math.sin(fa) * r * 1.1);
+    }
+    c.stroke();
+    ell(c, -r * .55, 0, r * .8, r * .62, '#3d2c3c'); ell(c, r * .35, 0, r * .4, r * .36, '#3d2c3c');
+    c.strokeStyle = '#cfc6b8'; c.lineWidth = Math.max(.8, r * .08); c.beginPath(); c.ellipse(-r * .55, 0, r * .8, r * .62, 0, 0, 6.3); c.stroke();
+    c.fillStyle = '#ff2a14'; c.beginPath(); c.arc(r * .6, -r * .13, r * .09, 0, 6.3); c.arc(r * .6, r * .13, r * .09, 0, 6.3); c.fill();
+    c.restore();
+  }
+  drawEye(c, e) {
+    const r = e.r; c.save(); c.globalAlpha = Math.min(1, e.life); c.translate(e.x, e.y);
+    const g = c.createRadialGradient(-r * .3, -r * .3, r * .1, 0, 0, r); g.addColorStop(0, '#fffdf6'); g.addColorStop(.7, '#ece2d2'); g.addColorStop(1, '#b39a86');
+    c.fillStyle = g; c.beginPath(); c.arc(0, 0, r, 0, 6.3); c.fill();
+    c.strokeStyle = 'rgba(180,20,25,.75)'; c.lineWidth = Math.max(1, r * .05);
+    for (const v of e.veins) { c.beginPath(); c.moveTo(Math.cos(v.a) * r * .97, Math.sin(v.a) * r * .97); c.quadraticCurveTo(Math.cos(v.a + v.b) * r * .75, Math.sin(v.a + v.b) * r * .75, Math.cos(v.a) * r * (1 - v.l), Math.sin(v.a) * r * (1 - v.l)); c.stroke(); }
+    const ix = e.look.x * r * .45, iy = e.look.y * r * .45;
+    c.fillStyle = e.col; c.beginPath(); c.arc(ix, iy, r * .42, 0, 6.3); c.fill();
+    c.fillStyle = '#060404'; c.beginPath(); c.arc(ix, iy, r * .2, 0, 6.3); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.arc(ix - r * .12, iy - r * .14, r * .08, 0, 6.3); c.fill();
+    c.restore();
+  }
+}
+
+/* =====================================================================
+   SCENE: SKELETON — you become a glowing pixel skeleton; dance moves trigger effects
+   ===================================================================== */
+const POSE_BONES = [[11, 13], [13, 15], [12, 14], [14, 16], [23, 25], [25, 27], [24, 26], [26, 28], [27, 29], [29, 31], [27, 31], [28, 30], [30, 32], [28, 32]];
+const POSE_HAND = [[15, 17], [15, 19], [15, 21], [16, 18], [16, 20], [16, 22]];
+class Skeleton {
+  constructor(app) { this.app = app; this.cd = {}; this.hist = []; this.wrists = []; this.upT = 0; this.openT = 0; this.jaw = 0; }
+  resize(W, H) { const P = SETTINGS.skeleton.pixel; this.lw = Math.ceil(W / P); this.lh = Math.ceil(H / P); this.lc = mkCanvas(this.lw, this.lh); this.lx = this.lc.getContext('2d'); this.gc = mkCanvas(this.lw, this.lh); this.gx = this.gc.getContext('2d'); }
+  enter() { this.app.toast('STEP BACK · WHOLE BODY IN VIEW'); }
+  clear() { this.app.fx.clear(); }
+  fakePose(t) {   // a dancing demo skeleton for when there's no camera
+    const W = this.app.W, H = this.app.H, U = H * .2, ph = t % 10;
+    const squat = ph > 5 && ph < 6.2 ? Math.sin((ph - 5) / 1.2 * Math.PI) : 0, jump = ph > 8 && ph < 8.5 ? Math.sin((ph - 8) / .5 * Math.PI) : 0;
+    const cx = W / 2 + Math.sin(t * .6) * W * .12, floor = H * .5 + U * 1.95, hipY = H * .5 + squat * U * .55 - jump * U * .5;
+    const up = ph > 2 && ph < 3.4, clap = ph > 7 && ph < 7.7;
+    const P = []; const set = (i, x, y) => P[i] = { x, y, v: 1 };
+    const shY = hipY - U; set(11, cx + .42 * U, shY); set(12, cx - .42 * U, shY);
+    set(0, cx, shY - .45 * U); set(7, cx + .17 * U, shY - .5 * U); set(8, cx - .17 * U, shY - .5 * U);
+    for (let i = 1; i <= 6; i++) set(i, cx, shY - .5 * U); set(9, cx + .05 * U, shY - .35 * U); set(10, cx - .05 * U, shY - .35 * U);
+    for (const [sd, s, e, w, pk, ix, th] of [[1, 11, 13, 15, 17, 19, 21], [-1, 12, 14, 16, 18, 20, 22]]) {
+      let a1 = .5 + Math.sin(t * 3.2 + sd) * .5, a2 = .4 + Math.sin(t * 3.2 + sd + 1) * .6;
+      if (up) { a1 = 2.8; a2 = .1; } if (clap) { a1 = 1.4; a2 = 1.1 + Math.sin(t * 18) * .25; }
+      const ex = P[s].x + Math.sin(a1) * sd * .55 * U, ey = P[s].y + Math.cos(a1) * .55 * U; set(e, ex, ey);
+      const wx = ex + Math.sin(a1 + a2) * sd * .5 * U, wy = ey + Math.cos(a1 + a2) * .5 * U; set(w, clap ? cx + sd * .05 * U : wx, wy);
+      set(pk, P[w].x + sd * .06 * U, P[w].y + .14 * U); set(ix, P[w].x, P[w].y + .17 * U); set(th, P[w].x - sd * .07 * U, P[w].y + .1 * U);
+    }
+    for (const [sd, h, k, a, he, fi] of [[1, 23, 25, 27, 29, 31], [-1, 24, 26, 28, 30, 32]]) {
+      set(h, cx + sd * .22 * U, hipY); const ay = Math.min(floor, floor - jump * U * .5);
+      set(a, cx + sd * (.18 + squat * .1) * U + Math.sin(t * 3.2 + sd) * .06 * U, ay);
+      set(k, cx + sd * (.22 + squat * .35) * U, (hipY + ay) / 2 - squat * U * .15);
+      set(he, P[a].x - sd * .03 * U, ay + .05 * U); set(fi, P[a].x + sd * .15 * U, ay + .08 * U);
+    }
+    return P;
+  }
+  update(dt) {
+    const app = this.app, S = SETTINGS.skeleton;
+    let P = app.pose && performance.now() - app.pose.seen < 600 ? app.pose.pts : null;
+    if (!P && (app.demo || !app.camOK)) { P = this.fakePose(app.t); this.fake = true; } else this.fake = false;
+    this.P = P; if (!P) return;
+    const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }), d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const sh = mid(P[11], P[12]), hp = mid(P[23], P[24]), L = d(sh, hp) || 1; this.L = L;
+    const cool = (k, sec) => { if ((this.cd[k] || 0) > app.t) return false; this.cd[k] = app.t + sec; return true; };
+    // 🙌 both hands above your head → blood rain
+    if (P[15].y < P[0].y - .15 * L && P[16].y < P[0].y - .15 * L) { this.upT += dt; if (this.upT > S.holdUp && cool('rain', 4)) app.fx.bloodRain(4); } else this.upT = 0;
+    // 👏 clap → eyeballs pop out of your hands
+    const wd = d(P[15], P[16]); this.wrists.push({ t: app.t, d: wd }); while (this.wrists.length && app.t - this.wrists[0].t > .6) this.wrists.shift();
+    if (wd < .3 * L && Math.max(...this.wrists.map(o => o.d)) > .9 * L && cool('clap', 1)) {
+      const m = mid(P[15], P[16]); for (let i = 0; i < 7; i++) app.fx.eyeball(m.x, m.y, rand(-500, 500), rand(-750, -200)); app.toast('EYEBALLS');
+    }
+    // squat → spiders swarm up from the floor
+    const kr = ((P[25].y - P[23].y) + (P[26].y - P[24].y)) / 2 / L;
+    if (kr < S.squat && cool('squat', 2.5)) { for (let i = 0; i < S.spiders; i++) app.fx.spider(rand(0, app.W), app.H + rand(5, 60), 0, 0, true); app.toast('SPIDERS'); }
+    // jump → lightning
+    const ay = (P[27].y + P[28].y) / 2; this.hist.push({ t: app.t, y: ay }); while (this.hist.length && app.t - this.hist[0].t > .35) this.hist.shift();
+    if (Math.max(...this.hist.map(o => o.y)) - ay > S.jump * L && cool('jump', 1.5)) { app.fx.lightning(P[0].x, P[0].y); app.toast('BOO!'); }
+    // jaw copies your mouth
+    const F = app.face, fresh = F && performance.now() - F.seen < 500;
+    const jawT = fresh && F.jaw != null ? clamp((F.jaw - .04) * 2.4, 0, 1) : this.fake ? (Math.sin(app.t * 2) > .6 ? .9 : .05) : clamp(app.level * 3, 0, 1);
+    this.jaw = lerp(this.jaw, jawT, .5);
+    if ((fresh || this.fake) && this.jaw > .45) { this.openT += dt; if (this.openT > S.mouthHold && this.mouth) app.fx.spew('skeleton', this.mouth.x, this.mouth.y, dt); }
+    else this.openT = Math.max(0, this.openT - dt * 2);
+  }
+  draw(ctx) {
+    const app = this.app, W = app.W, H = app.H, S = SETTINGS.skeleton, Pp = S.pixel, P = this.P;
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    if (!P) { ctx.fillStyle = '#5a6b5e'; ctx.font = '28px VT323, monospace'; ctx.textAlign = 'center'; ctx.fillText('step back so the camera sees your whole body', W / 2, H / 2); return; }
+    const x = this.lx, q = i => ({ x: P[i].x / Pp, y: P[i].y / Pp }), vis = i => P[i] && (P[i].v === undefined || P[i].v > .35);
+    const L = this.L / Pp, w = Math.max(1.4, L * .075);
+    x.clearRect(0, 0, this.lw, this.lh);
+    x.strokeStyle = x.fillStyle = S.bone; x.lineCap = 'round';
+    const bone = (a, b, ww = w) => {
+      if (!vis(a) || !vis(b)) return; const A = q(a), B = q(b);
+      x.lineWidth = ww; x.beginPath(); x.moveTo(A.x, A.y); x.lineTo(B.x, B.y); x.stroke();
+      for (const p of [A, B]) { x.beginPath(); x.arc(p.x, p.y, ww * .85, 0, 6.3); x.fill(); }
+    };
+    POSE_BONES.forEach(([a, b]) => bone(a, b)); POSE_HAND.forEach(([a, b]) => bone(a, b, w * .45)); bone(11, 12, w * .8);
+    // spine, ribs, pelvis
+    if (vis(11) && vis(12) && vis(23) && vis(24)) {
+      const s0 = { x: (q(11).x + q(12).x) / 2, y: (q(11).y + q(12).y) / 2 }, h0 = { x: (q(23).x + q(24).x) / 2, y: (q(23).y + q(24).y) / 2 };
+      const len = Math.hypot(h0.x - s0.x, h0.y - s0.y) || 1, dx = (h0.x - s0.x) / len, dy = (h0.y - s0.y) / len, nx = -dy, ny = dx;
+      for (let i = 0; i < 9; i++) { const t = (i + .5) / 9; x.fillRect(s0.x + dx * len * t - w * .45, s0.y + dy * len * t - w * .3, w * .9, w * .6); }
+      const hw = Math.hypot(q(11).x - q(12).x, q(11).y - q(12).y) * .42; x.lineWidth = w * .5;
+      for (let k = 1; k <= 5; k++) {
+        const t = .06 + k * .1, px = s0.x + dx * len * t, py = s0.y + dy * len * t, r = hw * (1.05 - k * .07);
+        for (const sd of [-1, 1]) { x.beginPath(); x.moveTo(px, py); x.quadraticCurveTo(px + nx * sd * r * 1.15 - dx * r * .15, py + ny * sd * r * 1.15 - dy * r * .15, px + nx * sd * r + dx * r * .35, py + ny * sd * r + dy * r * .35); x.stroke(); }
+      }
+      const hh = Math.hypot(q(23).x - q(24).x, q(23).y - q(24).y) / 2;
+      for (const i of [23, 24]) { const c = { x: lerp(h0.x, q(i).x, .55), y: lerp(h0.y, q(i).y, .55) }; ell(x, c.x, c.y, hh * .7, hh * .5, S.bone); x.save(); x.globalCompositeOperation = 'destination-out'; ell(x, c.x, c.y + hh * .05, hh * .3, hh * .2, '#000'); x.restore(); }
+    }
+    // pixel skull on your head (jaw opens with your mouth)
+    if (vis(0) && vis(7) && vis(8)) {
+      const e7 = q(7), e8 = q(8), n0 = q(0); let ex = e8.x - e7.x, ey = e8.y - e7.y; if (ex < 0) { ex = -ex; ey = -ey; }
+      const sw = Math.max(Math.hypot(ex, ey) * 1.8, L * .6), s = sw / 22, c = { x: ((e7.x + e8.x) / 2 + n0.x) / 2, y: ((e7.y + e8.y) / 2 + n0.y) / 2 }, ang = Math.atan2(ey, ex);
+      x.save(); x.translate(c.x, c.y); x.rotate(ang); x.fillStyle = S.bone;
+      SKULL_ART.forEach((row, r) => { for (let ci = 0; ci < row.length; ci++) if ('#TtJ'.includes(row[ci])) x.fillRect((ci - 11) * s, (r - 10) * s + (r >= 17 ? this.jaw * 3 * s : 0), s + .06, s + .06); });
+      x.fillStyle = SETTINGS.skull.eye; x.fillRect((5 - 11) * s, -s, 2 * s, 2 * s); x.fillRect((15 - 11) * s, -s, 2 * s, 2 * s);
+      x.restore();
+      const my = (17 - 10 + this.jaw * 3) * s; this.mouth = { x: (c.x - Math.sin(ang) * my) * Pp, y: (c.y + Math.cos(ang) * my) * Pp };
+    }
+    // glow, then crisp pixels
+    const gx = this.gx; gx.globalCompositeOperation = 'copy'; gx.drawImage(this.lc, 0, 0); gx.globalCompositeOperation = 'source-in'; gx.fillStyle = S.glow; gx.fillRect(0, 0, this.lw, this.lh); gx.globalCompositeOperation = 'source-over';
+    const pulse = 1 + (app.pulse || 0) * 1.4 + app.level * .2;
+    ctx.save(); ctx.imageSmoothingEnabled = true; ctx.globalCompositeOperation = 'lighter'; ctx.filter = `blur(${S.glowBlur}px)`; ctx.globalAlpha = Math.min(1, S.glowAmt * pulse);
+    ctx.drawImage(this.gc, 0, 0, this.lw * Pp, this.lh * Pp); ctx.filter = 'none'; ctx.restore();
+    ctx.save(); ctx.imageSmoothingEnabled = false; ctx.drawImage(this.lc, 0, 0, this.lw * Pp, this.lh * Pp); ctx.restore();
+  }
+}
+
+/* =====================================================================
+   APP — camera, hands, person mask, gestures, panel, render loop
+   ===================================================================== */
+class Haunt {
+  constructor() {
+    this.main = document.getElementById('main'); this.ctx = this.main.getContext('2d');
+    this.ovl = document.getElementById('ovl'); this.octx = this.ovl.getContext('2d');
+    this.video = document.getElementById('cam');
+    this.t = 0; this.last = performance.now();
+    this.hands = { L: this.blankHand(), R: this.blankHand() };
+    this.mouse = { x: 0, y: 0, btn: -1, shift: false, alt: false, t: -1e9 };
+    this.masks = []; this.maskNow = null; this.mw = SETTINGS.mask.cols; this.mh = 90; this.invVote = 0; this.maskInv = false;
+    this.mcache = {}; this.segC = mkCanvas(this.mw, this.mh); this.segX = this.segC.getContext('2d', { willReadFrequently: true });
+    this.toasts = []; this.title = { text: '', t: 9 }; this.fade = 0;
+    this.guideOn = true; this.showCam = false; this.demo = false; this.panelOn = true;
+    this.bass = 0; this.level = 0; this.swipe = []; this.swipeCD = 0; this.fistDone = false; this.selDone = false;
+    this.lastHand = 0; this.lastSeg = 0; this.lastFace = 0; this.lastPose = 0; this.spectrum = new Float32Array(40); this.bassHit = false; this.lastDemo = 0; this.camOK = false;
+    this.fx = new FX(this);
+    this.scenes = { blood: new Blood(this), ghost: new Ghost(this), skull: new Skull(this), faces: new Faces(this), paint: new BloodPaint(this), pumpkin: new Pumpkin(this), skeleton: new Skeleton(this) };
+    this.scene = SETTINGS.startScene;
+    this.resize(); addEventListener('resize', () => this.resize());
+    this.initInput(); this.buildPanel(); this.setScene(this.scene, true);
+    requestAnimationFrame(n => this.frame(n));
+  }
+  blankHand() { return { present: false, seen: 0, pose: null, lastPose: null, held: 0, started: false, x: 0, y: 0, bits: [0, 0, 0, 0, 0], cand: [0, 0, 0, 0, 0], tip: null, palm: null, pinchP: null }; }
+
+  /* ---------- layout ---------- */
+  resize() {
+    const W = this.W = innerWidth, H = this.H = innerHeight;
+    this.main.width = this.ovl.width = W; this.main.height = this.ovl.height = H;
+    for (const s of Object.values(this.scenes)) s.resize(W, H);
+    this.cutBig = mkCanvas(W / 4, H / 4); this.cutBx = this.cutBig.getContext('2d');
+  }
+  camRect() {
+    const W = this.W, H = this.H, M = SETTINGS.mask, va = this.mw / this.mh;
+    let w, h; if (W / H > va) { w = W; h = W / va; } else { h = H; w = H * va; }
+    w *= M.scale; h *= M.scale;
+    return { x: (W - w) / 2 + M.offsetX, y: (H - h) / 2 + M.offsetY, w, h };
+  }
+  camToScreen(nx, ny) { const r = this.camRect(), x = SETTINGS.mirror ? 1 - nx : nx; return { x: r.x + x * r.w, y: r.y + ny * r.h }; }
+  m2s(mx, my) { const r = this.camRect(); return { x: r.x + (mx + .5) / this.mw * r.w, y: r.y + (my + .5) / this.mh * r.h }; }
+  maskAt(sx, sy, f = this.maskNow) {
+    if (!f) return 0; const r = this.camRect(), mx = ((sx - r.x) / r.w * this.mw) | 0, my = ((sy - r.y) / r.h * this.mh) | 0;
+    if (mx < 0 || my < 0 || mx >= this.mw || my >= this.mh) return 0; return f.u8[my * this.mw + mx] / 255;
+  }
+  edgeDir(sx, sy) {
+    for (let d = 10; d < 600; d += 10) { const l = this.maskAt(sx - d, sy) < .5, r = this.maskAt(sx + d, sy) < .5; if (l && !r) return -1; if (r && !l) return 1; if (l && r) return Math.random() < .5 ? -1 : 1; }
+    return Math.random() < .5 ? -1 : 1;
+  }
+
+  /* ---------- person mask: ring buffer of frames ---------- */
+  frameAt(delay) {
+    const target = performance.now() - delay * 1000, m = this.masks;
+    for (let i = m.length - 1; i >= 0; i--) if (m[i].t <= target) return m[i];
+    return null;
+  }
+  pushMask(u8, t) {
+    const w = this.mw, h = this.mh; let sx = 0, sy = 0, n = 0, top = -1, bottom = -1;
+    for (let y = 0; y < h; y++) { let rc = 0; for (let x = 0; x < w; x++) { if (u8[y * w + x] > 127) { sx += x; sy += y; n++; rc++; } } if (rc >= 2) { if (top < 0) top = y; bottom = y; } }
+    let hx = n ? sx / n : w / 2;
+    if (top >= 0) { const r1 = top + Math.max(2, (bottom - top) * .12); let s = 0, c = 0; for (let y = top; y <= r1 && y < h; y++) for (let x = 0; x < w; x++) if (u8[y * w + x] > 127) { s += x; c++; } if (c) hx = s / c; }
+    const f = { u8, t, n, cx: n ? sx / n : w / 2, cy: n ? sy / n : h / 2, top, bottom, hx };
+    this.masks.push(f); if (this.masks.length > 200) this.masks.shift();
+    this.maskNow = f;
+  }
+  maskCanvas(f, key, rgb) {
+    let c = this.mcache[key];
+    if (!c || c.width !== this.mw || c.height !== this.mh) { c = this.mcache[key] = mkCanvas(this.mw, this.mh); c.x = c.getContext('2d'); c.img = c.x.createImageData(this.mw, this.mh); c.f = null; }
+    if (c.f === f) return c; c.f = f;
+    const d = c.img.data, u = f.u8, lo = (SETTINGS.mask.threshold - .15) * 255, k = 255 / (.3 * 255);
+    for (let i = 0, j = 0; i < u.length; i++, j += 4) { d[j] = rgb[0]; d[j + 1] = rgb[1]; d[j + 2] = rgb[2]; d[j + 3] = clamp((u[i] - lo) * k, 0, 1) * 255; }
+    c.x.putImageData(c.img, 0, 0); return c;
+  }
+  onSeg(res, t) {
+    const cm = res && res.confidenceMasks && res.confidenceMasks[0]; if (!cm) return;
+    const m = cm.getAsFloat32Array(), w = this.mw, h = this.mh; if (m.length !== w * h) return;
+    // auto-detect a backwards mask: the corners are almost always background
+    if (SETTINGS.mask.invert === 'auto') {
+      let c = 0; for (const [x, y] of [[1, 1], [w - 2, 1], [1, h - 2], [w - 2, h - 2]]) c += m[y * w + x];
+      this.invVote = clamp(this.invVote + (c / 4 > .6 ? 1 : -1), -20, 20); this.maskInv = this.invVote > 5;
+    } else this.maskInv = !!SETTINGS.mask.invert;
+    const u8 = new Uint8Array(w * h), mir = SETTINGS.mirror, inv = this.maskInv;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let v = m[y * w + x]; if (inv) v = 1 - v; u8[y * w + (mir ? w - 1 - x : x)] = v * 255; }
+    this.pushMask(u8, t);
+  }
+  demoMask(t) {
+    const w = this.mw, h = this.mh, c = this.segX, s = t / 1000;
+    c.clearRect(0, 0, w, h); c.fillStyle = c.strokeStyle = '#fff'; c.lineCap = 'round';
+    const x = w * (.5 + .32 * Math.sin(s * .32)), bob = Math.abs(Math.sin(s * 4)) * h * .01, sw = Math.sin(s * 4);
+    c.beginPath(); c.arc(x, h * .22 - bob, h * .075, 0, 6.3); c.fill();
+    c.beginPath(); c.roundRect(x - h * .085, h * .31 - bob, h * .17, h * .33, h * .04); c.fill();
+    c.lineWidth = h * .06; c.beginPath(); c.moveTo(x - h * .04, h * .62); c.lineTo(x - h * .04 + sw * h * .07, h * .97); c.moveTo(x + h * .04, h * .62); c.lineTo(x + h * .04 - sw * h * .07, h * .97); c.stroke();
+    c.lineWidth = h * .045; c.beginPath(); c.moveTo(x - h * .08, h * .34); c.lineTo(x - h * .11 - sw * h * .05, h * .6); c.moveTo(x + h * .08, h * .34); c.lineTo(x + h * .11 + sw * h * .05, h * .6); c.stroke();
+    const d = c.getImageData(0, 0, w, h).data, u8 = new Uint8Array(w * h);
+    for (let i = 0; i < u8.length; i++) u8[i] = d[i * 4 + 3];
+    this.pushMask(u8, t);
+  }
+
+  /* ---------- camera + models ---------- */
+  async start() {
+    document.getElementById('home').style.display = 'none';
+    try {
+      const st = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false });
+      this.video.srcObject = st; await this.video.play();                     // play() or the hidden video can stay black
+      await new Promise(r => this.video.readyState >= 2 ? r() : this.video.onloadeddata = r);
+      this.mw = SETTINGS.mask.cols; this.mh = Math.round(this.mw * this.video.videoHeight / this.video.videoWidth) || 90;
+      this.segC.width = this.mw; this.segC.height = this.mh; this.masks = []; this.camOK = true;
+      this.status('camera on');
+    } catch (e) { this.demo = true; this.status('no camera: demo figure + mouse'); this.toast('NO CAMERA · DEMO FIGURE'); this.syncButtons(); }
+    this.loadModels();
+  }
+  async loadModels() {
+    if (!this.camOK) return;
+    let V; try { V = await import(MP_URL); } catch (e) { this.status('MediaPipe failed to load (offline?)\nmouse still works'); return; }
+    try {
+      const fs = await V.FilesetResolver.forVisionTasks(MP_WASM);
+      const make = async (Cls, o) => { try { return await Cls.createFromOptions(fs, { ...o, baseOptions: { ...o.baseOptions, delegate: 'GPU' } }); } catch (e) { return await Cls.createFromOptions(fs, { ...o, baseOptions: { ...o.baseOptions, delegate: 'CPU' } }); } };
+      this.status('loading hands…');
+      this.handLM = await make(V.HandLandmarker, { baseOptions: { modelAssetPath: HAND_MODEL }, runningMode: 'VIDEO', numHands: 2, minHandDetectionConfidence: .5, minHandPresenceConfidence: .5, minTrackingConfidence: .5 });
+      this.status('hands on · loading person mask…');
+      try { this.seg = await make(V.ImageSegmenter, { baseOptions: { modelAssetPath: SEG_MODEL }, runningMode: 'VIDEO', outputConfidenceMasks: true, outputCategoryMask: false }); this.status('hands + person mask on'); }
+      catch (e) { this.status('hands on · person mask failed:\n' + e.message); }
+      try { this.faceLM = await make(V.FaceLandmarker, { baseOptions: { modelAssetPath: FACE_MODEL }, runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true }); this.status(this.statusText + '\n+ face (skull mouth)'); }
+      catch (e) { this.status(this.statusText + '\nface model failed'); }
+      try { this.poseLM = await make(V.PoseLandmarker, { baseOptions: { modelAssetPath: POSE_MODEL }, runningMode: 'VIDEO', numPoses: 1 }); this.status(this.statusText + '\n+ body (skeleton)'); }
+      catch (e) { this.status(this.statusText + '\nbody model failed'); }
+    } catch (e) { this.status('hand model failed: ' + e.message); }
+  }
+  vision(now) {
+    const v = this.video;
+    if (this.camOK && v.readyState >= 2) {
+      if (this.handLM && now - this.lastHand > 40) { this.lastHand = now; try { this.onHands(this.handLM.detectForVideo(v, now), now); } catch (e) {} }
+      if (this.poseLM && this.scene === 'skeleton' && now - this.lastPose > 40) { this.lastPose = now; try { this.onPose(this.poseLM.detectForVideo(v, now)); } catch (e) {} }
+      if (this.faceLM && (this.scene === 'skull' || this.scene === 'skeleton') && now - this.lastFace > 66) { this.lastFace = now; try { this.onFace(this.faceLM.detectForVideo(v, now)); } catch (e) {} }
+      if (this.seg && !this.demo && this.scene !== 'skeleton' && this.scene !== 'pumpkin' && now - this.lastSeg > 50) {
+        this.lastSeg = now; this.segX.drawImage(v, 0, 0, this.mw, this.mh);
+        try { this.seg.segmentForVideo(this.segC, now, r => this.onSeg(r, now)); } catch (e) {}
+      }
+    }
+    if (this.demo && now - this.lastDemo > 50) { this.lastDemo = now; this.demoMask(now); }
+  }
+
+  /* ---------- body (skeleton) ---------- */
+  onPose(res) {
+    const lm = res && res.landmarks && res.landmarks[0]; if (!lm) return;
+    const old = this.pose && performance.now() - this.pose.seen < 500 ? this.pose.pts : null;
+    const pts = lm.map((q, i) => { const p = this.camToScreen(q.x, q.y); return old ? { x: lerp(old[i].x, p.x, .55), y: lerp(old[i].y, p.y, .55), v: q.visibility } : { x: p.x, y: p.y, v: q.visibility }; });
+    this.pose = { pts, seen: performance.now() };
+  }
+
+  /* ---------- face (skull) ---------- */
+  onFace(res) {
+    const lm = res && res.faceLandmarks && res.faceLandmarks[0]; if (!lm) return;
+    const P = i => this.camToScreen(lm[i].x, lm[i].y), a = P(33), b = P(263), chin = P(152);
+    let dx = b.x - a.x, dy = b.y - a.y; if (dx < 0) { dx = -dx; dy = -dy; }
+    const eye = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    let jaw = null; const bs = res.faceBlendshapes && res.faceBlendshapes[0];
+    if (bs) { const c = bs.categories.find(c => c.categoryName === 'jawOpen'); if (c) jaw = c.score; }
+    const n = { x: eye.x, y: eye.y, px: Math.hypot(chin.x - eye.x, chin.y - eye.y) / 10.5, roll: Math.atan2(dy, dx), jaw }, F = this.face;
+    this.face = F && performance.now() - F.seen < 500
+      ? { x: lerp(F.x, n.x, .6), y: lerp(F.y, n.y, .6), px: lerp(F.px, n.px, .3), roll: lerp(F.roll, n.roll, .5), jaw, seen: performance.now() }
+      : { ...n, seen: performance.now() };
+  }
+  /** where your head is: face model if it has you, else the top of the person mask */
+  headInfo() {
+    const F = this.face; if (F && performance.now() - F.seen < 500) return F;
+    const m = this.maskNow;
+    if (m && m.n > 40 && m.top >= 0) { const r = this.camRect(), hh = (m.bottom - m.top) * .13, c = this.m2s(m.hx, m.top + hh * .55); return { x: c.x, y: c.y, px: hh / this.mh * r.h / 21 * 1.1, roll: 0, jaw: null }; }
+    return null;
+  }
+
+  /* ---------- hands ---------- */
+  onHands(res, now) {
+    const got = { L: null, R: null };
+    (res.landmarks || []).forEach((lm, i) => {
+      const hd = (res.handednesses || res.handedness || [])[i]; const lab = hd && hd[0] && hd[0].categoryName;
+      let left = lab === 'Left'; if (SETTINGS.swapHands) left = !left;    // flip with SWAP HANDS (key S) if your camera disagrees
+      let k = left ? 'L' : 'R'; if (got[k]) k = k === 'L' ? 'R' : 'L'; got[k] = lm;
+    });
+    for (const k of ['L', 'R']) if (got[k]) this.readHand(this.hands[k], got[k], now);
+  }
+  readHand(h, lm, now) {
+    const P = lm.map(q => this.camToScreen(q.x, q.y)), d = (a, b) => Math.hypot(P[a].x - P[b].x, P[a].y - P[b].y);
+    const size = d(0, 9) || 1;
+    const raw = [d(4, 5) > d(3, 5) * 1.2 && d(4, 0) > d(3, 0),
+      ...[[8, 6], [12, 10], [16, 14], [20, 18]].map(([t, p]) => d(t, 0) > d(p, 0) * 1.1)];
+    for (let b = 0; b < 5; b++) { const r = raw[b] ? 1 : 0; if (r !== h.bits[b]) { h.cand[b]++; if (h.cand[b] >= 2) { h.bits[b] = r; h.cand[b] = 0; } } else h.cand[b] = 0; }
+    const [, i, m, r, p] = h.bits, pinch = d(4, 8) / size < .3 && d(8, 0) > d(6, 0) * .95;
+    let pose = null;
+    if (pinch) pose = 'pinch';
+    else if (!i && !m && !r && !p) pose = 'fist';
+    else if (i && !m && !r && !p) pose = 'one';
+    else if (i && m && !r && !p) pose = 'two';
+    else if (i && m && r && !p) pose = 'three';
+    else if (i && m && r && p) pose = 'four';
+    else if (i && !m && !r && p) pose = 'rock';
+    else if (!i && !m && !r && p) pose = 'pinky';
+    const palm = { x: (P[0].x + P[5].x + P[9].x + P[13].x + P[17].x) / 5, y: (P[0].y + P[5].y + P[9].y + P[13].y + P[17].y) / 5 };
+    const sm = (o, n) => o ? { x: lerp(o.x, n.x, .6), y: lerp(o.y, n.y, .6) } : n;
+    h.tip = sm(h.present && h.tip, P[8]); h.palm = sm(h.present && h.palm, palm); h.pinchP = sm(h.present && h.pinchP, { x: (P[4].x + P[8].x) / 2, y: (P[4].y + P[8].y) / 2 });
+    h.pose = pose; h.present = true; h.seen = now; h.lm = P; h.raw = lm;
+  }
+  /** right hand as the scenes see it (falls back to the mouse) */
+  rightHand() {
+    const h = this.hands.R;
+    if (h.present) { const pt = h.pose === 'pinch' ? h.pinchP : h.pose === 'four' ? h.palm : h.tip; return { pose: h.pose, held: h.held, started: h.started, x: pt.x, y: pt.y }; }
+    const m = this.mouse;
+    if (m.btn >= 0) {   // mouse held = right hand (left click ☝, right click 🤏, shift ✋, alt ✌)
+      const pose = m.btn === 2 ? 'pinch' : m.shift ? 'four' : m.alt ? 'two' : 'one';
+      if (pose !== m.pose) { m.pose = pose; m.held = 0; m.started = true; } else m.started = false;
+      return { pose, held: m.held, started: m.started, x: m.x, y: m.y };
+    }
+    m.pose = null; return null;
+  }
+  gestures(dt, now) {
+    for (const k of ['L', 'R']) {
+      const h = this.hands[k];
+      if (h.present && now - h.seen > 300) { h.present = false; h.pose = null; }
+      if (h.pose === h.lastPose) { h.held += dt; h.started = false; } else { h.lastPose = h.pose; h.held = 0; h.started = true; }
+    }
+    if (this.mouse.btn >= 0) this.mouse.held = (this.mouse.held || 0) + dt;
+    const L = this.hands.L, R = this.hands.R;
+    const bothTwo = L.present && R.present && L.pose === 'two' && R.pose === 'two';
+    // left hand picks the scene
+    if (L.started) this.selDone = false;
+    const sc = SETTINGS.leftHandSwitch && L.present && SCENES.find(s => s.pose === L.pose);
+    this.selProg = 0;
+    if (sc && !bothTwo && !this.selDone) {
+      if (sc.id === this.scene) this.selDone = true;
+      else { this.selProg = L.held / (SETTINGS.holdToSwitch * (this.scene === 'skeleton' ? SETTINGS.skeleton.switchHold : 1)); if (this.selProg >= 1) { this.selDone = true; this.setScene(sc.id); } }
+    }
+    if (bothTwo) L.held = 0;
+    // fist hold (either hand) = clear + reset
+    const fist = (L.present && L.pose === 'fist' && L) || (R.present && R.pose === 'fist' && R);
+    this.fistProg = 0;
+    if (fist) { this.fistProg = fist.held / (SETTINGS.fistHold * (this.scene === 'skeleton' ? SETTINGS.skeleton.switchHold : 1)); if (this.fistProg >= 1 && !this.fistDone) { this.fistDone = true; this.clearScene(); } }
+    else this.fistDone = false;
+    // both hands ✌ swiped sideways = hide / show the panel
+    this.swipeCD -= dt;
+    if (bothTwo) {
+      this.swipe.push({ t: now, x: (L.tip.x + R.tip.x) / 2 }); while (this.swipe.length && now - this.swipe[0].t > 450) this.swipe.shift();
+      const dx = this.swipe[this.swipe.length - 1].x - this.swipe[0].x;
+      if (this.swipeCD <= 0 && Math.abs(dx) > this.W * .18) { this.setPanel(dx > 0); this.swipeCD = 1; this.swipe = []; }
+    } else this.swipe = [];
+  }
+
+  /* ---------- scenes ---------- */
+  setScene(id, quiet) {
+    const prev = this.scene; this.scene = id;
+    const sc = SCENES.find(s => s.id === id);
+    this.scenes[id].enter(); if (prev !== id) this.fx.clear();
+    if (!quiet && prev !== id) this.fade = 1;
+    this.title = { text: sc.name, t: 0 };
+    this.updatePanel();
+  }
+  clearScene() { this.scenes[this.scene].clear(); this.fx.clear(); this.fade = Math.max(this.fade, .6); this.toast('CLEARED'); }
+
+  /* ---------- audio (optional) ---------- */
+  /* ---------- audio: mic, a chosen input, or a browser tab's sound ---------- */
+  async toggleMic(kind) {   // no kind = stop · 'mic' = microphone / chosen input · 'tab' = share a tab's audio
+    if (this.audio) this.stopAudio();
+    if (!kind) { this.syncButtons(); return; }
+    try {
+      let stream;
+      if (kind === 'tab') {
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, systemAudio: 'include' });
+        if (!stream.getAudioTracks().length) { stream.getTracks().forEach(t => t.stop()); this.toast('NO SOUND SHARED · TICK "SHARE AUDIO"'); this.syncButtons(); return; }
+      } else {
+        const id = SETTINGS.audioDevice;
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: id ? { exact: id } : undefined, echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      }
+      const ctx = new AudioContext(); try { await ctx.resume(); } catch (e) {}
+      this.useAudio(ctx, ctx.createMediaStreamSource(stream), stream); this.audioKind = kind;
+      stream.getTracks().forEach(t => t.onended = () => { if (this.audio && this.audio.stream === stream) { this.stopAudio(); this.toast('AUDIO STOPPED'); this.syncButtons(); } });
+      this.toast(kind === 'tab' ? 'LISTENING TO TAB AUDIO' : 'LISTENING TO MIC'); this.listInputs();
+    } catch (e) { this.toast(kind === 'tab' ? 'TAB AUDIO CANCELLED' : 'NO MIC ACCESS'); }
+    this.syncButtons();
+  }
+  stopAudio() {
+    const A = this.audio; if (!A) return; this.audio = null;
+    clearInterval(A.tick); A.worklet && A.worklet.disconnect(); A.stream && A.stream.getTracks().forEach(t => t.stop()); A.ctx.close();
+    this.bass = this.level = this.bassEnv = 0; this.bpm = 0;
+  }
+  async listInputs() {
+    const sel = document.getElementById('audioDev'); if (!sel || !navigator.mediaDevices.enumerateDevices) return;
+    const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput');
+    sel.innerHTML = '<option value="">default input</option>' + devs.map((d, i) => `<option value="${d.deviceId}">${(d.label || 'input ' + (i + 1)).replace(/[<>&]/g, '')}</option>`).join('');
+    sel.value = SETTINGS.audioDevice || '';
+  }
+  useAudio(ctx, source, stream) {   // any audio node works (mic, tab, or a test signal)
+    const an = ctx.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = .15; source.connect(an);
+    const A = this.audio = { stream, ctx, an, buf: new Uint8Array(an.frequencyBinCount), kb: new Uint8Array(an.frequencyBinCount),
+      pl: [], pf: [], st: { l: { m: 0, v: 1 }, f: { m: 0, v: 1 } }, floor: null, lastOnset: -9, onsets: [], period: 0, conf: 0, lastBeat: -9, next: 0, pending: 0, off: null,
+      agc: { low: .05, all: .05, lowFloor: 1, allFloor: 1 } };
+    A.tick = setInterval(() => this.beatTick(), 8);
+    // onset detection on the audio thread: exact timing even when the graphics drop frames
+    const code = `class KickEnv extends AudioWorkletProcessor {
+      constructor() { super(); this.a = 0; this.b = 0; this.el = 0; this.ef = 0; this.n = 0; this.out = []; }
+      process(inp) { const ch = inp[0] && inp[0][0]; if (!ch) return true;
+        const k = 1 - Math.exp(-2 * Math.PI * 150 / sampleRate), ke = 1 - Math.exp(-1 / (.012 * sampleRate)), hop = 128;
+        for (let i = 0; i < ch.length; i++) { const x = ch[i]; this.a += k * (x - this.a); this.b += k * (this.a - this.b);
+          this.el += ke * (this.b * this.b - this.el); this.ef += ke * (x * x - this.ef);
+          if (++this.n >= hop) { this.out.push(currentTime + i / sampleRate, Math.sqrt(this.el), Math.sqrt(this.ef)); this.n = 0; } }
+        if (this.out.length >= 24) { this.port.postMessage(this.out); this.out = []; }
+        return true; } }
+      registerProcessor('kick-env', KickEnv);`;
+    const load = ctx.audioWorklet ? ctx.audioWorklet.addModule('data:application/javascript,' + encodeURIComponent(code))
+      .catch(() => ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: 'application/javascript' })))) : Promise.reject();
+    load.then(() => {
+      if (this.audio !== A) return;
+      const node = new AudioWorkletNode(ctx, 'kick-env'), mute = ctx.createGain(); mute.gain.value = 0;
+      source.connect(node); node.connect(mute).connect(ctx.destination);
+      node.port.onmessage = e => this.onEnv(e.data); A.worklet = node;
+    }).catch(() => { A.noWorklet = true; });   // falls back to the analyser in beatTick
+  }
+  onEnv(d) {   // [audioTime, lowRms, fullRms, ...] from the audio thread
+    const A = this.audio; if (!A) return;
+    const off = performance.now() / 1000 - A.ctx.currentTime; A.off = A.off == null ? off : Math.min(off, lerp(A.off, off, .05));
+    for (let i = 0; i < d.length; i += 3) this.onsetStep(d[i] + A.off, 20 * Math.log10(d[i + 1] + 1e-7), 20 * Math.log10(d[i + 2] + 1e-7));
+  }
+  onsetStep(t, dl, df) {   // onset = a sudden jump in level, judged against the song itself (works at any volume)
+    const A = this.audio, B = SETTINGS.beat;
+    A.pl.push(dl); A.pf.push(df); if (A.pl.length > 10) { A.pl.shift(); A.pf.shift(); }   // compare with ~25 ms ago
+    const fl = Math.max(0, dl - A.pl[0]), ff = Math.max(0, df - A.pf[0]);
+    const z = (s, x) => { const d = x - s.m; s.m += d / 800; s.v += (d * d - s.v) / 800; return (x - s.m) / Math.sqrt(Math.max(s.v, .25)); };
+    const zl = z(A.st.l, fl), zf = z(A.st.f, ff);
+    A.floor = A.floor == null ? df : df < A.floor ? lerp(A.floor, df, .02) : A.floor + .0015;   // noise floor (silence gate)
+    const strength = Math.max(zl, zf * .8);   // kick drum first, whole-mix punch if the mic can't hear bass
+    this.onsetZ = Math.max((this.onsetZ || 0) * .98, strength);
+    if (strength > 1.5 + B.sensitivity && df > A.floor + 9 && t - A.lastOnset > 60 / B.maxBpm * .8) { A.lastOnset = t; this.onKick(t); }
+  }
+  beatTick() {   // fallback detector (no worklet) + the beat clock that fills in beats between kicks
+    const A = this.audio; if (!A) return;
+    const now = performance.now() / 1000;
+    if (A.noWorklet) {
+      const sr = A.ctx.sampleRate, N = A.an.fftSize; A.an.getByteFrequencyData(A.kb);
+      const k1 = Math.max(2, Math.ceil(150 * N / sr)); let low = 0, all = 0;
+      for (let i = 1; i <= k1; i++) low += A.kb[i]; for (let i = 1; i < A.kb.length; i++) all += A.kb[i];
+      this.onsetStep(now, low / k1 * .4 - 100, all / A.kb.length * .4 - 100);
+    }
+    const locked = A.period && A.conf > .5 && now - A.lastOnset < 3;
+    if (locked && A.next && now >= A.next) { this.fireBeat(A.next); A.next += A.period; }
+    this.beatLocked = locked;
+  }
+  onKick(t) {
+    const A = this.audio; this.kickAt = t;
+    A.onsets.push(t); while (A.onsets.length > 24 || t - A.onsets[0] > 10) A.onsets.shift();
+    this.estimateTempo();
+    const P = A.period, locked = P && A.conf > .5;
+    if (!locked) { this.fireBeat(t); A.next = 0; return; }
+    if (Math.abs(t - A.lastBeat) < .2 * P) { A.lastBeat = lerp(A.lastBeat, t, .4); A.next = A.lastBeat + P; return; }   // kick on a beat we already played: nudge the phase
+    if (!A.next || Math.abs(A.next - t) < .2 * P || t > A.next + .2 * P) { this.fireBeat(t); A.next = t + P; return; }   // kick on the beat
+    // off-beat kick (syncopation): leave the clock alone
+  }
+  fireBeat(t) { const A = this.audio; if (t - A.lastBeat < .1) return; A.lastBeat = t; A.pending++; }
+  estimateTempo() {
+    const A = this.audio, B = SETTINGS.beat, o = A.onsets; if (o.length < 5) { A.conf = 0; return; }
+    const pMin = 60 / B.maxBpm, pMax = 60 / B.minBpm; let best = 0, bp = 0;
+    for (let p = pMin; p <= pMax; p += .002) {
+      let sc = 0;
+      for (let i = 0; i < o.length; i++) for (let j = i + 1; j < o.length; j++) {
+        const d = o[j] - o[i]; if (d > 4) break; const k = Math.round(d / p); if (k < 1 || k > 8) continue;
+        const e = (d - k * p) / .018; sc += Math.exp(-e * e) / Math.sqrt(k);
+      }
+      const lp = Math.log2(p / .5); sc *= Math.exp(-lp * lp * 1.5);   // gently prefer ~120 BPM so it doesn't lock at half / double time
+      if (sc > best) { best = sc; bp = p; }
+    }
+    A.period = A.period && Math.abs(bp - A.period) / A.period < .04 ? lerp(A.period, bp, .25) : bp;
+    // confidence = share of recent kicks that sit on the beat grid (syncopated extras are allowed)
+    let cx = 0, cy = 0; for (const t of o) { const a = t / A.period * 2 * Math.PI; cx += Math.cos(a); cy += Math.sin(a); }
+    const ph = Math.atan2(cy, cx) / (2 * Math.PI); let on = 0;
+    for (const t of o) { let u = t / A.period - ph; u -= Math.round(u); if (Math.abs(u) < .1) on++; }
+    A.conf = on / o.length;
+  }
+  listen(dt) {
+    this.bass = Math.max(0, this.bass - dt * 3); this.bassHit = this.beatHit = false;
+    const A = this.audio, sp = this.spectrum;
+    if (!A) { for (let b = 0; b < sp.length; b++) sp[b] *= Math.pow(.1, dt); this.level *= Math.pow(.1, dt); this.bassEnv = (this.bassEnv || 0) * Math.pow(.1, dt); this.pulse = (this.pulse || 0) * Math.pow(.05, dt); this.sinceBeat = 99; return; }
+    if (A.pending) { A.pending = 0; this.beatHit = this.bassHit = true; this.bass = 1; }
+    const now = performance.now() / 1000;
+    const live = A.period && A.conf > .5 && now - A.lastOnset < 3;
+    this.sinceBeat = now - A.lastBeat; this.beatPeriod = live ? A.period : .5;
+    this.bpm = live ? Math.round(60 / A.period) : 0;
+    A.an.getByteFrequencyData(A.buf);
+    const sr = A.ctx.sampleRate, N = A.an.fftSize, G = SETTINGS.audioGain, kb = Math.max(2, Math.ceil(150 * N / sr)), kh = Math.ceil(4000 * N / sr);
+    let low = 0, all = 0; for (let i = 1; i <= kb; i++) low += A.buf[i]; low /= kb * 255; for (let i = 1; i <= kh; i++) all += A.buf[i]; all /= kh * 255;
+    // auto gain: how far the sound stands out from its own recent average, so any volume works and steady noise stays calm
+    const g = A.agc, fall = Math.pow(.85, dt), sm = 1 - Math.exp(-dt / .04), ew = 1 - Math.exp(-dt / 1.5);
+    const zs = (key, x) => { const q = g[key] || (g[key] = { s: x, m: x, v: 0 }); q.s += (x - q.s) * sm; const d = q.s - q.m; q.m += d * ew; q.v += (d * d - q.v) * ew;
+      const sd = Math.sqrt(q.v); return clamp(((q.s - q.m) / Math.max(sd, .004) - .4) / 1.6, 0, 1) * clamp((sd - .006) / .015, 0, 1); };
+    const nl = zs('zl', low), na = zs('za', all);
+    const ns = Math.max(nl, na * .8) * clamp(G / 1.5, .3, 2);   // bass if the mic hears it, otherwise the whole mix
+    this.bassEnv = ns > (this.bassEnv || 0) ? lerp(this.bassEnv || 0, ns, .7) : lerp(this.bassEnv, ns, 1 - Math.pow(.002, dt));
+    this.level = lerp(this.level, clamp(na * clamp(G / 1.5, .3, 2), 0, 1), .3);
+    g.all = Math.max(all, (g.all || .05) * fall, .02);
+    this.bass = Math.max(this.bass, Math.pow(clamp(this.bassEnv, 0, 1), 1.6));   // every "bass" reaction in every scene now follows the music continuously
+    // 40 log-spaced bands, 40 Hz – 8 kHz, normalised to the loudest band
+    const nb = sp.length; let pk = 0; const raw = this._raw || (this._raw = new Float32Array(nb));
+    for (let b = 0; b < nb; b++) {
+      const f0 = 40 * Math.pow(200, b / nb), f1 = 40 * Math.pow(200, (b + 1) / nb), i0 = Math.max(1, Math.floor(f0 * N / sr)), i1 = Math.max(i0 + 1, Math.ceil(f1 * N / sr));
+      let a = 0; for (let i = i0; i < i1 && i < A.buf.length; i++) a += A.buf[i]; raw[b] = a / ((i1 - i0) * 255); pk = Math.max(pk, raw[b]);
+    }
+    const P = this.beatPeriod, u = this.sinceBeat / P;
+    const clock = this.sinceBeat < P * 2 ? (u % 1 < .06 ? (u % 1) / .06 : Math.pow(Math.max(0, 1 - (u % 1 - .06) / .55), 2)) : 0;
+    this.pulse = Math.max(clock, Math.pow(clamp(this.bassEnv, 0, 1), 1.4) * .85);
+    g.spec = Math.max(pk, (g.spec || .1) * fall, .05);
+    for (let b = 0; b < nb; b++) { const v = clamp((raw[b] / g.spec - .35) / .65, 0, 1); sp[b] = v > sp[b] ? lerp(sp[b], v, .6) : sp[b] * Math.pow(.2, dt); }
+  }
+
+  /* ---------- render loop ---------- */
+  frame(now) {
+    const dt = Math.min(.05, (now - this.last) / 1000); this.last = now; this.t += dt;
+    this.vision(now); this.gestures(dt, now); this.listen(dt);
+    const R = this.rightHand(), sc = this.scenes[this.scene], ctx = this.ctx, W = this.W, H = this.H;
+    sc.update(dt, R); this.fx.update(dt);
+    ctx.save(); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.filter = 'none';
+    sc.draw(ctx);
+    ctx.restore();
+    if (SETTINGS.cutOutPerson[this.scene] && this.maskNow) this.cutPerson(ctx);
+    ctx.save(); this.fx.draw(ctx); ctx.restore();
+    if (this.showCam) this.drawCam(ctx);
+    const pump = this.audio && SETTINGS.beatPump ? (this.pulse || 0) * SETTINGS.beatPump : 0;
+    if (Math.abs(pump - (this.lastPump || 0)) > .004) { this.main.style.transform = pump ? `scale(${1 + pump * .035})` : ''; this.main.style.filter = pump ? `brightness(${1 + pump * .35})` : ''; this.lastPump = pump; }
+    if (this.fade > 0) { ctx.fillStyle = `rgba(0,0,0,${this.fade})`; ctx.fillRect(0, 0, W, H); this.fade = Math.max(0, this.fade - dt * 2.2); }
+    this.drawOverlay(dt, R);
+    if (this.panelOn) this.drawPip();
+    requestAnimationFrame(n => this.frame(n));
+  }
+  cutPerson(ctx) {
+    const M = SETTINGS.mask, c = this.maskCanvas(this.maskNow, 'cut', [0, 0, 0]), r = this.camRect(), b = this.cutBx, q = .25, g = M.grow * q;
+    b.clearRect(0, 0, this.cutBig.width, this.cutBig.height);
+    const offs = g > 0 ? [[0, 0], [g, 0], [-g, 0], [0, g], [0, -g], [g * .7, g * .7], [-g * .7, -g * .7], [g * .7, -g * .7], [-g * .7, g * .7]] : [[0, 0]];
+    for (const [ox, oy] of offs) b.drawImage(c, r.x * q + ox, r.y * q + oy, r.w * q, r.h * q);
+    ctx.save(); ctx.globalCompositeOperation = 'destination-out'; ctx.globalAlpha = M.shadow; ctx.filter = `blur(${M.feather}px)`;
+    ctx.drawImage(this.cutBig, 0, 0, this.W, this.H); ctx.drawImage(this.cutBig, 0, 0, this.W, this.H); ctx.restore();   // twice = solid core, soft fade at the edge
+    ctx.save(); ctx.globalCompositeOperation = 'destination-over'; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, this.W, this.H); ctx.restore();
+  }
+  drawCam(ctx) {
+    const r = this.camRect();
+    ctx.save(); ctx.globalAlpha = .35;
+    if (this.camOK) { if (SETTINGS.mirror) { ctx.translate(this.W, 0); ctx.scale(-1, 1); ctx.drawImage(this.video, this.W - r.x - r.w, r.y, r.w, r.h); } else ctx.drawImage(this.video, r.x, r.y, r.w, r.h); }
+    ctx.restore();
+    if (this.maskNow) { ctx.save(); ctx.globalAlpha = .35; ctx.drawImage(this.maskCanvas(this.maskNow, 'view', [80, 255, 120]), r.x, r.y, r.w, r.h); ctx.restore(); }
+    ctx.strokeStyle = 'rgba(120,255,140,.5)'; ctx.setLineDash([6, 6]); ctx.strokeRect(r.x, r.y, r.w, r.h); ctx.setLineDash([]);
+  }
+  drawPip() {
+    const c = this.pip || (this.pip = document.getElementById('pip')), x = c.getContext('2d');
+    const w = c.width, h = Math.round(w * this.mh / this.mw); if (c.height !== h) c.height = h;
+    x.fillStyle = '#000'; x.fillRect(0, 0, w, h);
+    if (this.camOK && this.video.readyState >= 2) {
+      x.save(); if (SETTINGS.mirror) { x.translate(w, 0); x.scale(-1, 1); } x.drawImage(this.video, 0, 0, w, h); x.restore();
+    }
+    if (this.maskNow) { x.globalAlpha = this.camOK ? .4 : .8; x.drawImage(this.maskCanvas(this.maskNow, 'pip', [80, 255, 120]), 0, 0, w, h); x.globalAlpha = 1; }
+    for (const k of ['L', 'R']) {
+      const hd = this.hands[k]; if (!hd.present || !hd.raw) continue;
+      x.fillStyle = k === 'L' ? '#d9ff6a' : '#ff5a6a';
+      for (const q of hd.raw) x.fillRect((SETTINGS.mirror ? 1 - q.x : q.x) * w - 1.5, q.y * h - 1.5, 3, 3);
+      x.font = '14px VT323, monospace'; x.fillText((k === 'L' ? 'L ' : 'R ') + (hd.pose || ''), (SETTINGS.mirror ? 1 - hd.raw[0].x : hd.raw[0].x) * w + 4, hd.raw[0].y * h + 12);
+    }
+    if (!this.camOK) { x.fillStyle = '#8a8070'; x.font = '15px VT323, monospace'; x.fillText(this.demo ? 'no camera · demo figure' : 'camera off', 6, 16); }
+    if (this.audio) { const sp = this.spectrum, bw = w / sp.length; x.fillStyle = 'rgba(200,20,30,.85)'; for (let b = 0; b < sp.length; b++) x.fillRect(b * bw, h - sp[b] * h * .3, bw - 1, sp[b] * h * .3); if (this.bass > .5) { x.fillStyle = '#ff3344'; x.fillRect(w - 10, 4, 6, 6); }
+      x.font = '16px VT323, monospace'; x.textAlign = 'right'; x.fillStyle = this.bpm ? '#ff6a6a' : '#8a8070'; x.fillText(this.bpm ? `${this.bpm} BPM` : 'finding beat…', w - 16, 14); x.textAlign = 'left'; }
+  }
+  drawOverlay(dt, R) {
+    const o = this.octx, W = this.W, H = this.H;
+    o.clearRect(0, 0, W, H);
+    // scene title
+    this.title.t += dt;
+    if (this.title.t < 2.2) {
+      const a = this.title.t < .3 ? this.title.t / .3 : Math.max(0, 1 - (this.title.t - 1.2));
+      o.save(); o.globalAlpha = a; o.font = `${Math.min(W, H) * .16}px Creepster, serif`; o.textAlign = 'center'; o.textBaseline = 'middle';
+      o.fillStyle = SCENES.find(s => s.id === this.scene).col;
+      o.shadowColor = '#000'; o.shadowBlur = 30; o.fillText(this.title.text, W / 2, H * .45); o.restore();
+    }
+    // hands
+    const L = this.hands.L, Rh = this.hands.R;
+    const ring = (x, y, rad, p, col, label) => {
+      o.save(); o.lineWidth = 4; o.strokeStyle = 'rgba(255,255,255,.15)'; o.beginPath(); o.arc(x, y, rad, 0, 6.3); o.stroke();
+      o.strokeStyle = col; o.beginPath(); o.arc(x, y, rad, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clamp(p, 0, 1)); o.stroke();
+      if (label) { o.font = '22px VT323, monospace'; o.fillStyle = col; o.textAlign = 'center'; o.fillText(label, x, y - rad - 10); }
+      o.restore();
+    };
+    if (L.present && this.selProg > 0) { const sc = SCENES.find(s => s.pose === L.pose); ring(L.palm.x, L.palm.y, 46, this.selProg, '#d9ff6a', sc && sc.name); }
+    if (this.fistProg > 0) { const h = (L.present && L.pose === 'fist') ? L : Rh; if (h.palm) ring(h.palm.x, h.palm.y, 52, this.fistProg, '#ff3344', 'CLEAR'); }
+    if (this.guideOn) {
+      if (L.present && L.palm) { o.fillStyle = 'rgba(217,255,106,.35)'; o.beginPath(); o.arc(L.palm.x, L.palm.y, 6, 0, 6.3); o.fill(); }
+      if (R) { o.strokeStyle = 'rgba(255,255,255,.4)'; o.lineWidth = 2; o.beginPath(); o.arc(R.x, R.y, R.pose === 'pinch' ? 8 : 14, 0, 6.3); o.stroke(); }
+    }
+    // audio meter, top-left: proves it's hearing the music
+    if (this.audio && this.guideOn) {
+      const x0 = 16, y0 = 30, A = this.audio, run = A.ctx.state === 'running';
+      o.save(); o.font = '18px VT323, monospace'; o.fillStyle = 'rgba(0,0,0,.55)'; o.fillRect(x0 - 6, y0 - 18, 168, 34);
+      o.fillStyle = run ? '#e9e2d0' : '#ff5a5a'; o.fillText(run ? (this.bpm ? `♪ ${this.bpm} BPM` : '♪ listening…') : 'AUDIO PAUSED · CLICK', x0, y0);
+      o.fillStyle = 'rgba(255,255,255,.15)'; o.fillRect(x0, y0 + 6, 120, 5); o.fillStyle = '#c0141f'; o.fillRect(x0, y0 + 6, 120 * clamp(this.bassEnv || 0, 0, 1), 5);
+      const pulse = Math.max(0, 1 - (this.sinceBeat || 9) / .15); o.fillStyle = `rgba(255,60,70,${.25 + .75 * pulse})`; o.beginPath(); o.arc(x0 + 140, y0 + 1, 5 + pulse * 4, 0, 6.3); o.fill();
+      o.restore();
+    }
+    // toasts
+    o.save(); o.textAlign = 'center'; o.font = '30px VT323, monospace';
+    let y = H - 70;
+    for (let i = this.toasts.length - 1; i >= 0; i--) {
+      const t = this.toasts[i]; t.t += dt; if (t.t > 2) { this.toasts.splice(i, 1); continue; }
+      o.globalAlpha = Math.min(1, 2 - t.t); o.fillStyle = '#000'; o.fillText(t.msg, W / 2 + 2, y + 2); o.fillStyle = '#e9e2d0'; o.fillText(t.msg, W / 2, y); y -= 34;
+    }
+    o.restore();
+  }
+  toast(msg) { this.toasts.push({ msg, t: 0 }); if (this.toasts.length > 4) this.toasts.shift(); }
+  status(s) { this.statusText = s; const el = document.getElementById('status'); if (el) el.textContent = s; }
+
+  /* ---------- panel + keys ---------- */
+  setPanel(show) { this.panelOn = show; document.getElementById('panel').classList.toggle('hide', !show); }
+  buildPanel() {
+    const sw = document.getElementById('scenes');
+    for (const s of SCENES) { const b = document.createElement('button'); b.dataset.id = s.id; b.innerHTML = `<span>${s.name}</span><small>${s.left}</small>`; b.onclick = () => this.setScene(s.id); sw.appendChild(b); }
+    const tg = document.getElementById('toggles');
+    this.toggles = [
+      ['CUT OUT ME', () => SETTINGS.cutOutPerson[this.scene], () => SETTINGS.cutOutPerson[this.scene] = !SETTINGS.cutOutPerson[this.scene]],
+      ['CAMERA VIEW', () => this.showCam, () => this.showCam = !this.showCam],
+      ['DEMO FIGURE', () => this.demo, () => { this.demo = !this.demo; this.masks = []; this.maskNow = null; }],
+      ['MIC IN', () => this.audio && this.audioKind === 'mic', () => this.toggleMic(this.audio && this.audioKind === 'mic' ? null : 'mic')],
+      ['TAB AUDIO', () => this.audio && this.audioKind === 'tab', () => this.toggleMic(this.audio && this.audioKind === 'tab' ? null : 'tab')],
+      ['SOUND BLOOD', () => SETTINGS.blood.sound, () => this.toggleSoundBlood()],
+      [() => 'SHAPES: ' + { mix: 'MIX', hold: 'HOLD 4', every: 'EVERY BEAT' }[SETTINGS.blood.shapeMode], () => true, () => this.cycleShapeMode()],
+      ['BEAT PUMP', () => !!SETTINGS.beatPump, () => SETTINGS.beatPump = SETTINGS.beatPump ? 0 : 1],
+      ['MIRROR', () => SETTINGS.mirror, () => { SETTINGS.mirror = !SETTINGS.mirror; this.masks = []; this.maskNow = null; }],
+      ['LEFT HAND SWITCH', () => SETTINGS.leftHandSwitch, () => { SETTINGS.leftHandSwitch = !SETTINGS.leftHandSwitch; this.toast(SETTINGS.leftHandSwitch ? 'LEFT HAND SWITCHES SCENES' : 'SCENE SWITCHING LOCKED'); }],
+      ['SWAP HANDS', () => SETTINGS.swapHands, () => SETTINGS.swapHands = !SETTINGS.swapHands],
+      ['GUIDE', () => this.guideOn, () => this.guideOn = !this.guideOn],
+      ['CLEAR', () => false, () => this.clearScene()],
+    ];
+    this.toggleEls = this.toggles.map(([n, , fn]) => { const b = document.createElement('button'); b.textContent = typeof n === 'function' ? n() : n; b.onclick = () => { fn(); this.syncButtons(); }; tg.appendChild(b); return b; });
+    const sl = document.getElementById('sliders'), S = SETTINGS;
+    const defs = [
+      ['AUDIO GAIN', () => S.audioGain, v => S.audioGain = v, .2, 5, .1],
+      ['BEAT SENS', () => S.beat.sensitivity, v => S.beat.sensitivity = v, .5, 3, .05],
+      ['MASK X', () => S.mask.offsetX, v => S.mask.offsetX = v, -500, 500, 1],
+      ['MASK Y', () => S.mask.offsetY, v => S.mask.offsetY = v, -400, 400, 1],
+      ['MASK SIZE', () => S.mask.scale, v => S.mask.scale = v, .5, 2, .01],
+      ['MASK GROW', () => S.mask.grow, v => S.mask.grow = v, 0, 40, 1],
+      ['FEATHER', () => S.mask.feather, v => S.mask.feather = v, 0, 80, 1],
+      ['BLOOD RATE', () => S.blood.rate, v => S.blood.rate = v, 0, 15, .1],
+      ['GHOST LAG', () => S.ghost.delays[0], v => S.ghost.delays = [v, v * 2.2, v * 3.6], .1, 4, .05],
+      ['SKULL SIZE', () => S.skull.pixel, v => S.skull.pixel = v, 6, 40, 1],
+      ['FACES MAX', () => S.faces.max, v => S.faces.max = v, 0, 10, 1],
+    ];
+    for (const [n, get, set, mn, mx, st] of defs) {
+      const row = document.createElement('label'); row.className = 'sl';
+      row.innerHTML = `<span>${n}</span><input type="range" min="${mn}" max="${mx}" step="${st}" value="${get()}"><span>${+get().toFixed(2)}</span>`;
+      const inp = row.querySelector('input'), out = row.lastChild;
+      inp.oninput = () => { set(+inp.value); out.textContent = +(+inp.value).toFixed(2); };
+      sl.appendChild(row);
+    }
+    document.getElementById('go').onclick = () => this.start();
+    const dev = document.getElementById('audioDev');
+    dev.onchange = () => { SETTINGS.audioDevice = dev.value; if (!this.audio || this.audioKind === 'mic') this.toggleMic('mic'); };
+  }
+  toggleSoundBlood() {
+    SETTINGS.blood.sound = !SETTINGS.blood.sound; this.scenes.blood.clear(); this.scenes.blood.parts = null;
+    if (SETTINGS.blood.sound && !this.audio) this.toggleMic('mic');
+    this.toast(SETTINGS.blood.sound ? 'SOUND BLOOD ON' : 'SOUND BLOOD OFF'); this.syncButtons();
+  }
+  syncButtons() { if (this.toggleEls) this.toggles.forEach(([n, get], i) => { const el = this.toggleEls[i]; el.classList.toggle('on', !!get()); if (typeof n === 'function') el.textContent = n(); }); }
+  cycleShapeMode() {
+    const B = SETTINGS.blood, order = ['mix', 'hold', 'every']; B.shapeMode = order[(order.indexOf(B.shapeMode) + 1) % order.length];
+    const bl = this.scenes.blood; bl.patI = -1; bl.need = B.shapeMode === 'every' ? 1 : B.shapeMode === 'hold' ? B.holdBeats : (B.pattern[0] || 1);
+    this.toast({ mix: 'SHAPES: HOLD 4 BEATS, THEN QUICK FLIPS', hold: 'SHAPES: CHANGE EVERY 4 BEATS', every: 'SHAPES: CHANGE EVERY BEAT' }[B.shapeMode]); this.syncButtons();
+  }
+  updatePanel() {
+    document.querySelectorAll('#scenes button').forEach(b => b.classList.toggle('on', b.dataset.id === this.scene));
+    const sc = SCENES.find(s => s.id === this.scene);
+    document.getElementById('fmap').innerHTML = sc.right.map(([g, w]) => `<b>${g}</b> ${w}`).join('<br>') + '<br><b>✊ hold</b> clear + reset';
+    document.getElementById('guide').innerHTML =
+      `LEFT: ` + SCENES.map(s => `${s.icon} ${s.name.toLowerCase()}`).join(' · ') + ` &nbsp;|&nbsp; RIGHT: ` + sc.right.map(([g, w]) => `<b>${g}</b> ${w}`).join(' · ') + ` &nbsp;|&nbsp; <b>✊</b> clear · <b>✌✌ swipe</b> panel`;
+    this.syncButtons();
+  }
+  initInput() {
+    addEventListener('keydown', e => {
+      if (e.target.tagName === 'INPUT') return;
+      const k = e.key.toLowerCase();
+      if (k >= '1' && k <= '7') this.setScene(SCENES[+k - 1].id);
+      else if (k === 'b') this.toggleSoundBlood();
+      else if (k === 'n') this.cycleShapeMode();
+      else if (k === 'a') this.toggleMic(this.audio ? null : 'mic');
+      else if (k === 'l') { SETTINGS.leftHandSwitch = !SETTINGS.leftHandSwitch; this.toast(SETTINGS.leftHandSwitch ? 'LEFT HAND SWITCHES SCENES' : 'SCENE SWITCHING LOCKED'); }
+      else if (k === 'h') this.setPanel(!this.panelOn);
+      else if (k === 'g') { this.guideOn = !this.guideOn; document.getElementById('guide').classList.toggle('off', !this.guideOn); }
+      else if (k === 'c') this.showCam = !this.showCam;
+      else if (k === 'd') { this.demo = !this.demo; this.masks = []; this.maskNow = null; }
+      else if (k === 'm') { SETTINGS.mirror = !SETTINGS.mirror; this.masks = []; this.maskNow = null; this.toast(SETTINGS.mirror ? 'MIRROR ON' : 'MIRROR OFF'); }
+      else if (k === 's') { SETTINGS.swapHands = !SETTINGS.swapHands; this.toast('HANDS SWAPPED'); }
+      else if (k === 'p') SETTINGS.cutOutPerson[this.scene] = !SETTINGS.cutOutPerson[this.scene];
+      else if (k === 'x') this.clearScene();
+      else if (k === 'f') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); }
+      this.syncButtons();
+    });
+    const mv = e => { this.mouse.x = e.clientX; this.mouse.y = e.clientY; this.mouse.shift = e.shiftKey; this.mouse.alt = e.altKey; this.mouse.t = performance.now(); };
+    this.main.addEventListener('pointerdown', e => { mv(e); this.mouse.btn = e.button; this.mouse.held = 0; });
+    addEventListener('pointermove', mv);
+    addEventListener('pointerup', () => { this.mouse.btn = -1; });
+    const wake = () => { if (this.audio && this.audio.ctx.state !== 'running') this.audio.ctx.resume(); };
+    addEventListener('pointerdown', wake); addEventListener('keydown', wake);
+    this.main.addEventListener('contextmenu', e => e.preventDefault());
+  }
+}
+
+addEventListener('DOMContentLoaded', () => { window.app = new Haunt(); });
+</script>
+</body>
+</html>
